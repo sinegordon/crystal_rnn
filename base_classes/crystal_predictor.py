@@ -10,6 +10,7 @@ from .models import RNNNet
 
 
 DEFAULT_FLATTEN_ORDER = ("x", "y", "z", "atom", "coord")
+"""Default order for packing a supercell tensor into the flat RNN input."""
 ORDER_AXIS_TO_DIM = {
     "x": 0,
     "y": 1,
@@ -17,74 +18,6 @@ ORDER_AXIS_TO_DIM = {
     "atom": 3,
     "coord": 4,
 }
-
-
-def _count_coordinate_triples(features_count):
-    if features_count % 3 != 0:
-        raise ValueError("Coordinate feature count must be divisible by 3")
-    return features_count // 3
-
-
-def _validate_block_features(init_features, in_features):
-    if init_features.ndim != 3:
-        raise ValueError("init_features must have shape (num_blocks, sequence_length, block_features)")
-    if init_features.shape[-1] != in_features:
-        raise ValueError("Each block in init_features must have the same feature count as the model input")
-
-
-def _normalize_average_groups(blocks, num_blocks, block_triples):
-    if blocks is None:
-        return []
-
-    parent = {}
-
-    def find(item):
-        parent.setdefault(item, item)
-        if parent[item] != item:
-            parent[item] = find(parent[item])
-        return parent[item]
-
-    def union(left, right):
-        parent[find(right)] = find(left)
-
-    for pair in blocks:
-        if len(pair) != 2:
-            raise ValueError("Each blocks entry must be a pair of positions")
-        left = _normalize_block_position(pair[0], num_blocks, block_triples)
-        right = _normalize_block_position(pair[1], num_blocks, block_triples)
-        union(left, right)
-
-    groups = {}
-    for item in parent:
-        groups.setdefault(find(item), []).append(item)
-
-    return [group for group in groups.values() if len(group) > 1]
-
-
-def _normalize_block_position(position, num_blocks, block_triples):
-    if len(position) != 2:
-        raise ValueError("A block position must be a pair: (block_index, triple_index)")
-
-    block_index, triple_index = int(position[0]), int(position[1])
-    if not 0 <= block_index < num_blocks:
-        raise ValueError("block_index is out of range")
-    if not 0 <= triple_index < block_triples:
-        raise ValueError("triple_index is out of range")
-    return block_index, triple_index
-
-
-def _average_block_positions(y, average_groups):
-    if not average_groups:
-        return y
-
-    y = y.reshape(y.shape[0], -1, 3)
-    for group in average_groups:
-        block_indices = torch.tensor([item[0] for item in group], dtype=torch.long, device=y.device)
-        triple_indices = torch.tensor([item[1] for item in group], dtype=torch.long, device=y.device)
-        average = y[block_indices, triple_indices].mean(dim=0)
-        y[block_indices, triple_indices] = average
-
-    return y.reshape(y.shape[0], -1)
 
 
 def _as_shape3(name, value):
@@ -104,11 +37,13 @@ def _normalize_flatten_order(flatten_order):
 
 
 def _flatten_supercell(block, flatten_order):
+    """Pack a `(bx, by, bz, unit_cell_atoms, 3)` supercell into a flat vector."""
     axes = [ORDER_AXIS_TO_DIM[name] for name in flatten_order]
     return np.transpose(block, axes=axes).reshape(-1)
 
 
 def _unflatten_supercell(flat_features, train_supercell_shape, unit_cell_atoms, flatten_order):
+    """Restore a flat model output to `(bx, by, bz, unit_cell_atoms, 3)`."""
     ordered_shape = []
     canonical_shape = (*train_supercell_shape, unit_cell_atoms, 3)
     for name in flatten_order:
@@ -184,6 +119,7 @@ def _run_model_on_crystal(
     periodic,
     flatten_order,
 ):
+    """Run one PyTorch model over a full crystal displacement field."""
     crystal_shape = tuple(init_displacements.shape[1:4])
     origins = _build_supercell_origins(crystal_shape, train_supercell_shape, stride_shape, periodic)
     if not origins:
@@ -201,6 +137,7 @@ def _run_model_on_crystal(
             for origin in origins:
                 index = _supercell_indices(origin, train_supercell_shape, crystal_shape, periodic)
                 block_x = x[(slice(None), *index, slice(None), slice(None))]
+                # The RNN still sees the same flat input format it was trained on.
                 block_x_flat = torch.stack(
                     [
                         torch.as_tensor(_flatten_supercell(frame.detach().cpu().numpy(), flatten_order), dtype=x.dtype)
@@ -225,6 +162,7 @@ def _run_model_on_crystal(
             if torch.any(prediction_count == 0):
                 raise ValueError("Some crystal cells were not covered by any inference block")
 
+            # Overlapping supercell predictions are averaged per physical cell and atom.
             y = prediction_sum / prediction_count
             predictions.append(y.detach().cpu().numpy())
             x[:-1] = x[1:].clone()
@@ -234,6 +172,7 @@ def _run_model_on_crystal(
 
 
 def _flatten_crystal_block_samples(blocks, flatten_order):
+    """Flatten crystal block histories for crystal-aware training."""
     return np.array(
         [
             [_flatten_supercell(frame, flatten_order) for frame in sample]
@@ -244,10 +183,18 @@ def _flatten_crystal_block_samples(blocks, flatten_order):
 
 
 def _flatten_crystal_block_targets(blocks, flatten_order):
+    """Flatten one-step crystal block targets for crystal-aware training."""
     return np.array([_flatten_supercell(block, flatten_order) for block in blocks], dtype=np.float32)
 
 
 class CrystalRNNNet:
+    """Train and run an RNN predictor for flat or crystal-structured displacement data.
+
+    A flat model is created by passing `in_features`.
+    A crystal-aware model is created by passing `train_supercell_shape` and
+    `unit_cell_atoms`; in that case `in_features` is derived from geometry.
+    """
+
     def __init__(
         self,
         hidden_size,
@@ -280,6 +227,7 @@ class CrystalRNNNet:
         self.model = RNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type)
 
     def _resolve_in_features(self, in_features):
+        """Resolve the flat model input size from explicit features or crystal metadata."""
         if self.train_supercell_shape is None and self.unit_cell_atoms is None:
             if in_features is None:
                 raise ValueError("in_features is required for models without crystal metadata")
@@ -306,9 +254,19 @@ class CrystalRNNNet:
 
     @property
     def is_crystal_aware(self):
+        """Whether this predictor has enough metadata for crystal-shaped IO."""
         return self.train_supercell_shape is not None and self.unit_cell_atoms is not None
 
     def flatten_supercell(self, supercell_displacements):
+        """Pack one training supercell according to this model's `flatten_order`.
+
+        Args:
+            supercell_displacements: Array with shape
+                `(bx, by, bz, unit_cell_atoms, 3)`.
+
+        Returns:
+            Flat vector with length `self.in_features`.
+        """
         if not self.is_crystal_aware:
             raise ValueError("Crystal metadata is required to flatten supercell displacements")
         return _flatten_supercell(
@@ -317,6 +275,14 @@ class CrystalRNNNet:
         )
 
     def unflatten_supercell(self, flat_features):
+        """Restore one flat model vector to this model's supercell shape.
+
+        Args:
+            flat_features: Flat vector with length `self.in_features`.
+
+        Returns:
+            Array with shape `(bx, by, bz, unit_cell_atoms, 3)`.
+        """
         if not self.is_crystal_aware:
             raise ValueError("Crystal metadata is required to unflatten supercell displacements")
         return _unflatten_supercell(
@@ -327,6 +293,7 @@ class CrystalRNNNet:
         )
 
     def train(self, X_coords, y_coords, data_len=0.5):
+        """Train the underlying RNN from already flattened samples."""
         self.train_count = int(data_len * X_coords.shape[0])
         if self.train_count <= 0:
             raise ValueError("train_count must be positive")
@@ -364,6 +331,18 @@ class CrystalRNNNet:
         return losses
 
     def train_crystal_blocks(self, X_blocks, y_blocks, data_len=0.5):
+        """Train from crystal-shaped supercell blocks.
+
+        Args:
+            X_blocks: Training histories with shape
+                `(n_samples, sequence_length, bx, by, bz, unit_cell_atoms, 3)`.
+            y_blocks: One-step targets with shape
+                `(n_samples, bx, by, bz, unit_cell_atoms, 3)`.
+            data_len: Fraction of samples used for one randomized training slice.
+
+        Returns:
+            List of mean training losses, one value per epoch.
+        """
         if not self.is_crystal_aware:
             raise ValueError("Crystal metadata is required to train from crystal blocks")
 
@@ -392,6 +371,7 @@ class CrystalRNNNet:
         return self.train(X_coords, y_coords, data_len=data_len)
 
     def run(self, count_steps, init_features):
+        """Autoregressively roll out predictions from one flat input history."""
         self.model.eval()
         mas = []
         x = torch.as_tensor(init_features, dtype=torch.float32)
@@ -405,30 +385,6 @@ class CrystalRNNNet:
         mas = np.array(mas)
         return mas
 
-    def run_blockwise(self, count_steps, init_features, blocks=None):
-        """Run inference over already prepared block inputs.
-
-        Args:
-            count_steps: Number of rollout steps.
-            init_features: Block history with shape (num_blocks, sequence_length, block_features).
-            blocks: Pairs of equivalent block-local triple positions to average after each step.
-        """
-        block_triples = _count_coordinate_triples(self.in_features)
-        _validate_block_features(init_features, self.in_features)
-        self.model.eval()
-        mas = []
-        x = torch.as_tensor(init_features, dtype=torch.float32)
-        average_groups = _normalize_average_groups(blocks, x.shape[0], block_triples)
-
-        with torch.no_grad():
-            for _ in range(count_steps):
-                y = _average_block_positions(self.model(x), average_groups)
-                mas.append(y.detach().cpu().numpy())
-                x[:, :-1] = x[:, 1:].clone()
-                x[:, -1] = y
-
-        return np.array(mas)
-
     def run_crystal(
         self,
         count_steps,
@@ -438,6 +394,21 @@ class CrystalRNNNet:
         stride_shape=None,
         periodic=False,
     ):
+        """Autoregressively roll out predictions for a full crystal.
+
+        Args:
+            count_steps: Number of predicted time steps.
+            init_displacements: Initial history with shape
+                `(sequence_length, nx, ny, nz, unit_cell_atoms, 3)`.
+            train_supercell_shape: Optional override for the training supercell shape.
+            unit_cell_atoms: Optional override for the number of atoms per unit cell.
+            stride_shape: Supercell origin stride in unit-cell coordinates. Defaults
+                to `(1, 1, 1)`, giving maximal overlap.
+            periodic: Whether supercells may wrap around crystal boundaries.
+
+        Returns:
+            Array with shape `(count_steps, nx, ny, nz, unit_cell_atoms, 3)`.
+        """
         if train_supercell_shape is None:
             if self.train_supercell_shape is None:
                 raise ValueError("train_supercell_shape is required for models without crystal metadata")
@@ -469,6 +440,8 @@ class CrystalRNNNet:
 
 
 class CrystalRNNNetBagging:
+    """Average predictions from several `CrystalRNNNet` predictors."""
+
     def __init__(self, models, in_features=None):
         if not models and in_features is None:
             raise ValueError("in_features is required when models is empty")
@@ -480,6 +453,7 @@ class CrystalRNNNetBagging:
         self.flatten_order = getattr(first_model, "flatten_order", DEFAULT_FLATTEN_ORDER)
 
     def run(self, count_steps, init_features, separate=False):
+        """Run an ensemble rollout from one flat input history."""
         for model in self.models:
             model.eval()
 
@@ -510,50 +484,6 @@ class CrystalRNNNetBagging:
         mas = np.array(mas)
         return mas
 
-    def run_blockwise(self, count_steps, init_features, blocks=None, separate=False):
-        block_triples = _count_coordinate_triples(self.in_features)
-        _validate_block_features(init_features, self.in_features)
-        init_features = torch.as_tensor(init_features, dtype=torch.float32)
-        average_groups = _normalize_average_groups(blocks, init_features.shape[0], block_triples)
-
-        for model in self.models:
-            model.eval()
-
-        if separate:
-            model_predictions = []
-            for model in self.models:
-                model_predictions.append(self._run_model_blockwise(model, count_steps, init_features, average_groups))
-            return np.array(model_predictions).mean(axis=0)
-
-        mas = []
-        x = init_features.clone()
-
-        with torch.no_grad():
-            for _ in range(count_steps):
-                model_step_predictions = []
-                for model in self.models:
-                    model_step_predictions.append(_average_block_positions(model(x), average_groups))
-
-                z = torch.stack(model_step_predictions, dim=0).mean(dim=0)
-                mas.append(z.detach().cpu().numpy())
-                x[:, :-1] = x[:, 1:].clone()
-                x[:, -1] = z
-
-        return np.array(mas)
-
-    def _run_model_blockwise(self, model, count_steps, init_features, average_groups):
-        mas = []
-        x = init_features.clone()
-
-        with torch.no_grad():
-            for _ in range(count_steps):
-                y = _average_block_positions(model(x), average_groups)
-                mas.append(y.detach().cpu().numpy())
-                x[:, :-1] = x[:, 1:].clone()
-                x[:, -1] = y
-
-        return np.array(mas)
-
     def run_crystal(
         self,
         count_steps,
@@ -565,6 +495,7 @@ class CrystalRNNNetBagging:
         separate=False,
         flatten_order=None,
     ):
+        """Run ensemble inference over a full crystal displacement field."""
         if train_supercell_shape is None:
             if self.train_supercell_shape is None:
                 raise ValueError("train_supercell_shape is required for models without crystal metadata")
@@ -622,6 +553,7 @@ class CrystalRNNNetBagging:
                     for origin in origins:
                         index = _supercell_indices(origin, train_supercell_shape, crystal_shape, periodic)
                         block_x = x[(slice(None), *index, slice(None), slice(None))]
+                        # Match the flat ordering used by the crystal-aware training path.
                         block_x_flat = torch.stack(
                             [
                                 torch.as_tensor(
@@ -649,6 +581,7 @@ class CrystalRNNNetBagging:
                     if torch.any(prediction_count == 0):
                         raise ValueError("Some crystal cells were not covered by any inference block")
 
+                    # Average overlaps for this model before ensemble averaging.
                     model_step_predictions.append(prediction_sum / prediction_count)
 
                 y = torch.stack(model_step_predictions, dim=0).mean(dim=0)

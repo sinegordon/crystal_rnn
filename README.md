@@ -13,6 +13,53 @@ Download it from the `v1.0` release:
 
 - `coords_lmp.raw`: `https://github.com/sinegordon/crystal_rnn/releases/download/v1.0/coords_lmp.raw`
 
+## Crystal Data Preparation
+
+LAMMPS trajectories can be converted to the crystal-shaped format used by `train_crystal_blocks(...)`:
+
+```python
+from base_classes import (
+    FCC_CONVENTIONAL_BASIS,
+    build_crystal_atom_order,
+    make_crystal_block_samples,
+    positions_to_crystal_displacements,
+    read_lammps_dump_positions,
+)
+
+positions, box_lengths = read_lammps_dump_positions("Cu.LAMMPSDUMP")
+reference_positions = positions[0]
+atom_order = build_crystal_atom_order(
+    reference_positions=reference_positions,
+    crystal_shape=(5, 2, 2),
+    box_lengths=box_lengths[0],
+    basis_fractional=FCC_CONVENTIONAL_BASIS,
+)
+displacements = positions_to_crystal_displacements(
+    positions=positions,
+    reference_positions=reference_positions,
+    atom_order=atom_order,
+    box_lengths=box_lengths,
+)
+X_blocks, y_blocks = make_crystal_block_samples(
+    displacements=displacements,
+    train_supercell_shape=(2, 2, 1),
+    sequence_length=3,
+)
+```
+
+`X_blocks` and `y_blocks` can be passed directly to `model.train_crystal_blocks(...)`.
+
+The same preparation is available as a CLI:
+
+```bash
+python prepare_crystal_data.py Cu.LAMMPSDUMP crystal_training_data.npz \
+  --input-format dump \
+  --crystal-shape 5 2 2 \
+  --train-supercell-shape 2 2 1 \
+  --sequence-length 3 \
+  --basis fcc
+```
+
 ## Blockwise Inference
 
 `CrystalRNNNet.run_crystal(...)` runs inference on a larger crystal by sliding the rectangular training supercell over the full displacement field.
@@ -74,4 +121,4 @@ y_blocks.shape == (n_samples, bx, by, bz, unit_cell_atoms, 3)
 
 `train_crystal_blocks(...)` flattens each training block with the model's `flatten_order`, so training and `run_crystal(...)` share the same packing convention.
 
-`run_blockwise(...)` is still available for manually prepared block inputs, but `run_crystal(...)` is the physically structured interface for rectangular training supercells.
+`run_crystal(...)` is the physically structured inference interface for rectangular training supercells.
