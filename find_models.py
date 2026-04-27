@@ -1,3 +1,10 @@
+"""Train several crystal-aware RNN models and keep the best candidates.
+
+The script expects training data prepared by ``prepare_crystal_data.py``.  The
+data contains crystal-shaped displacement tensors for training and the original
+flat atom order required by the legacy S(q,w) evaluation utility.
+"""
+
 import argparse
 from pathlib import Path
 
@@ -23,6 +30,7 @@ KCOUNT = 5
 
 
 def parse_args():
+    """Parse command-line options for model search and evaluation."""
     parser = argparse.ArgumentParser(description="Train and select crystal-aware RNN predictors.")
     parser.add_argument("count_models", type=int, help="Number of models to train.")
     parser.add_argument("rnn_type", help="Recurrent block type: RNN, GRU, or LSTM.")
@@ -48,6 +56,7 @@ def parse_args():
 
 
 def load_training_data(path):
+    """Load and validate crystal training arrays from an ``.npz`` dataset."""
     print("IMPORT DATA")
     data = np.load(path)
     required = [
@@ -71,6 +80,7 @@ def load_training_data(path):
 
 
 def build_default_k_vectors():
+    """Build the default reciprocal-space vectors used for S(q,w) scoring."""
     kmin = 2 * np.pi / (NCELLS * LATTICE_PARAMETER)
     kmax = NCELLS * kmin
     kmas = np.zeros((KCOUNT, 3), dtype=np.float32)
@@ -79,20 +89,40 @@ def build_default_k_vectors():
 
 
 def get_sqw_default(coords, dt, step):
+    """Calculate S(q,w) with the repository's default k-vector grid."""
     return get_sqw(coords, dt=dt, step=step, kmas=build_default_k_vectors())
 
 
 def crystal_frames_to_flat_positions(displacements, reference_positions, atom_order):
+    """Convert crystal-shaped displacement frames to legacy flat coordinates.
+
+    Parameters
+    ----------
+    displacements:
+        Displacement tensor with shape ``(frames, nx, ny, nz, atoms_per_cell, 3)``.
+    reference_positions:
+        Equilibrium atom positions in the original flat atom order.
+    atom_order:
+        Integer tensor that maps each crystal slot to its original flat atom
+        index.
+
+    Returns
+    -------
+    numpy.ndarray
+        Absolute positions flattened as ``(frames, atoms * 3)`` for ``get_sqw``.
+    """
     positions = reference_positions[atom_order] + displacements
     frames = positions.shape[0]
     atoms = reference_positions.shape[0]
     flat = np.empty((frames, atoms, 3), dtype=np.float32)
+    # Restore the original atom order because S(q,w) works with flat trajectories.
     for crystal_index in np.ndindex(atom_order.shape):
         flat[:, atom_order[crystal_index], :] = positions[(slice(None), *crystal_index, slice(None))]
     return flat.reshape(frames, atoms * 3)
 
 
 def sample_initial_crystal_sequence(displacements, sequence_length, count_steps):
+    """Sample the initial crystal displacement history used for autoregression."""
     if displacements.shape[0] <= count_steps:
         begin_index = sequence_length
     else:
@@ -101,6 +131,7 @@ def sample_initial_crystal_sequence(displacements, sequence_length, count_steps)
 
 
 def sample_reference_window(displacements, sequence_length, count_steps):
+    """Sample a trajectory window used as the reference for one model score."""
     if displacements.shape[0] <= count_steps + sequence_length:
         start = sequence_length
     else:
@@ -109,6 +140,7 @@ def sample_reference_window(displacements, sequence_length, count_steps):
 
 
 def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
+    """Run crystal inference several times and compare mean S(q,w) to reference."""
     displacements = data["displacements"]
     atom_order = data["atom_order"]
     reference_positions = data["reference_positions"]
@@ -121,6 +153,8 @@ def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
 
     print(f"INFERENCE {count_run} TIMES")
     for _ in range(count_run):
+        # Each rollout starts from a sampled real trajectory prefix, then the
+        # model continues the dynamics in crystal tensor format.
         init = sample_initial_crystal_sequence(displacements, model_sequence_length(data), count_steps)
         predicted_displacements = model.run_crystal(count_steps, init, periodic=periodic)
         predicted_coords = crystal_frames_to_flat_positions(predicted_displacements, reference_positions, atom_order)
@@ -134,10 +168,12 @@ def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
 
 
 def model_sequence_length(data):
+    """Return the recurrent input history length stored in the training blocks."""
     return int(data["X_blocks"].shape[1])
 
 
 def plot_sqw(reference_xi, reference_yi, reference_jlp, predicted_xi, predicted_yi, predicted_jlp):
+    """Show reference and predicted S(q,w) maps using the same color scheme."""
     plt.pcolormesh(reference_xi, reference_yi, reference_jlp, cmap="Blues")
     plt.show()
     plt.pcolormesh(predicted_xi, predicted_yi, predicted_jlp, cmap="Blues")
@@ -145,6 +181,7 @@ def plot_sqw(reference_xi, reference_yi, reference_jlp, predicted_xi, predicted_
 
 
 def save_model(model, models_dir, norm, rnn_type, data_len, count_steps):
+    """Persist a selected model with its score and basic training metadata."""
     models_path = Path(models_dir)
     models_path.mkdir(parents=True, exist_ok=True)
     filepath = models_path / f"mean_norm_{norm}_{rnn_type.lower()}_crystal_{int(data_len * count_steps)}.pth"
@@ -153,6 +190,7 @@ def save_model(model, models_dir, norm, rnn_type, data_len, count_steps):
 
 
 def main():
+    """Train candidate models, evaluate them, and save models below threshold."""
     args = parse_args()
     data = load_training_data(args.data_path)
     unit_cell_atoms = int(data["X_blocks"].shape[5])
