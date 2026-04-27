@@ -84,7 +84,17 @@ def sample_initial_sequence(dcoords_global, sequence_length, count_steps):
     return np.array([dcoords_global[begin_index - sequence_length : begin_index]], dtype=np.float32)
 
 
-def evaluate_model(model, coords_reference, dcoords_global, dc, count_steps, count_run, dt, step, sequence_length):
+def evaluate_model(
+    model,
+    coords_reference,
+    dcoords_global,
+    dc,
+    count_steps,
+    count_run,
+    dt,
+    step,
+    sequence_length,
+):
     xi_ref, yi_ref, jlp_ref = get_sqw_default(coords_reference, dt, step)
     jlp_mean = np.zeros_like(jlp_ref)
     norm = 0.0
@@ -133,7 +143,7 @@ def main():
         )
 
         predictor = CrystalRNNNet(
-            in_features=coords_list.shape[1],
+            in_features=x_coords.shape[-1],
             hidden_size=HIDDEN_SIZE,
             num_layers=NUM_LAYERS,
             type=args.rnn_type.upper(),
