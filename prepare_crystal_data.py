@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--basis", choices=["fcc", "none"], default="fcc")
     parser.add_argument("--stride-shape", nargs=3, type=int, default=None)
     parser.add_argument("--periodic", action="store_true")
+    parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--max-frames", type=int, default=None)
     return parser.parse_args()
 
@@ -32,9 +33,13 @@ def parse_args():
 def main():
     args = parse_args()
     if args.input_format == "dump":
-        positions, box_lengths = read_lammps_dump_positions(args.input_path, max_frames=args.max_frames)
+        positions, box_lengths = read_lammps_dump_positions(
+            args.input_path,
+            max_frames=args.max_frames,
+            start_frame=args.start_frame,
+        )
     else:
-        positions = read_raw_positions(args.input_path, max_frames=args.max_frames)
+        positions = read_raw_positions(args.input_path, max_frames=args.max_frames, start_frame=args.start_frame)
         box_lengths = None
 
     if box_lengths is None:
@@ -74,6 +79,7 @@ def main():
         box_lengths=box_lengths,
         crystal_shape=np.asarray(args.crystal_shape, dtype=np.int64),
         train_supercell_shape=np.asarray(args.train_supercell_shape, dtype=np.int64),
+        start_frame=np.asarray(args.start_frame, dtype=np.int64),
     )
     print(f"Saved {output_path}")
     print(f"X_blocks shape: {X_blocks.shape}")

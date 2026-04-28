@@ -57,8 +57,13 @@ python prepare_crystal_data.py Cu.LAMMPSDUMP crystal_training_data.npz \
   --crystal-shape 5 2 2 \
   --train-supercell-shape 2 2 1 \
   --sequence-length 3 \
+  --start-frame 0 \
   --basis fcc
 ```
+
+Use `--start-frame N` to skip the first `N` trajectory frames before collecting
+data. If `--max-frames M` is also provided, the script reads `M` consecutive
+frames after that offset.
 
 ## Blockwise Inference
 

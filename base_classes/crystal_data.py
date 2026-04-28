@@ -13,20 +13,26 @@ FCC_CONVENTIONAL_BASIS = np.array(
 """Fractional basis positions for a conventional FCC unit cell."""
 
 
-def read_raw_positions(path, max_frames=None):
+def read_raw_positions(path, max_frames=None, start_frame=0):
     """Read whitespace-separated flat coordinate frames.
 
     Args:
         path: Path to a `.raw` file where each row contains `x y z` triples.
         max_frames: Optional maximum number of frames to read.
+        start_frame: Number of initial frames to skip before reading.
 
     Returns:
         Array with shape `(frames, atoms, 3)`.
     """
+    if start_frame < 0:
+        raise ValueError("start_frame must be non-negative")
+
     frames = []
     with open(path) as file:
         for line_index, line in enumerate(file):
-            if max_frames is not None and line_index >= max_frames:
+            if line_index < start_frame:
+                continue
+            if max_frames is not None and len(frames) >= max_frames:
                 break
             values = np.fromstring(line, sep=" ", dtype=np.float32)
             if values.size % 3 != 0:
@@ -38,7 +44,7 @@ def read_raw_positions(path, max_frames=None):
     return np.stack(frames, axis=0)
 
 
-def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True):
+def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True, start_frame=0):
     """Read atom positions from a LAMMPS dump trajectory.
 
     The parser expects `ITEM: ATOMS` records with `id`, `x`, `y`, and `z`
@@ -49,13 +55,18 @@ def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True):
         path: Path to a LAMMPS dump file.
         max_frames: Optional maximum number of frames to read.
         sort_by_id: Whether to sort atoms by atom id inside each frame.
+        start_frame: Number of initial frames to skip before collecting frames.
 
     Returns:
         A tuple `(positions, box_lengths)` where positions has shape
         `(frames, atoms, 3)` and box_lengths has shape `(frames, 3)`.
     """
+    if start_frame < 0:
+        raise ValueError("start_frame must be non-negative")
+
     frames = []
     boxes = []
+    seen_frames = 0
 
     with open(path) as file:
         while max_frames is None or len(frames) < max_frames:
@@ -106,8 +117,10 @@ def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True):
                 order = np.argsort(np.asarray(ids))
                 positions = positions[order]
 
-            frames.append(positions)
-            boxes.append(box_lengths)
+            if seen_frames >= start_frame:
+                frames.append(positions)
+                boxes.append(box_lengths)
+            seen_frames += 1
 
     if not frames:
         raise ValueError("No LAMMPS frames were read")

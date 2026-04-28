@@ -121,50 +121,58 @@ def crystal_frames_to_flat_positions(displacements, reference_positions, atom_or
     return flat.reshape(frames, atoms * 3)
 
 
-def sample_initial_crystal_sequence(displacements, sequence_length, count_steps):
-    """Sample the initial crystal displacement history used for autoregression."""
-    if displacements.shape[0] <= count_steps:
+def sample_rollout_windows(displacements, sequence_length, count_steps):
+    """Sample a causally matched initial history and reference continuation."""
+    required_frames = sequence_length + count_steps
+    if displacements.shape[0] < required_frames:
+        raise ValueError("Not enough displacement frames for sequence_length + count_steps")
+
+    if displacements.shape[0] == required_frames:
         begin_index = sequence_length
     else:
-        begin_index = np.random.randint(low=sequence_length, high=displacements.shape[0] - count_steps)
-    return displacements[begin_index - sequence_length : begin_index].astype(np.float32)
+        begin_index = np.random.randint(low=sequence_length, high=displacements.shape[0] - count_steps + 1)
 
-
-def sample_reference_window(displacements, sequence_length, count_steps):
-    """Sample a trajectory window used as the reference for one model score."""
-    if displacements.shape[0] <= count_steps + sequence_length:
-        start = sequence_length
-    else:
-        start = np.random.randint(low=sequence_length, high=displacements.shape[0] - count_steps)
-    return displacements[start : start + count_steps].astype(np.float32)
+    init = displacements[begin_index - sequence_length : begin_index].astype(np.float32)
+    reference = displacements[begin_index : begin_index + count_steps].astype(np.float32)
+    return init, reference
 
 
 def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
     """Run crystal inference several times and compare mean S(q,w) to reference."""
+    if count_run <= 0:
+        raise ValueError("count_run must be positive")
+
     displacements = data["displacements"]
     atom_order = data["atom_order"]
     reference_positions = data["reference_positions"]
-    reference_window = sample_reference_window(displacements, model_sequence_length(data), count_steps)
-    reference_coords = crystal_frames_to_flat_positions(reference_window, reference_positions, atom_order)
-    xi_ref, yi_ref, jlp_ref = get_sqw_default(reference_coords, dt, step)
-    jlp_mean = np.zeros_like(jlp_ref)
+    sequence_length = model_sequence_length(data)
+    jlp_ref_mean = None
+    jlp_mean = None
     norm = 0.0
-    xi_pred = yi_pred = None
+    xi_ref = yi_ref = xi_pred = yi_pred = None
 
     print(f"INFERENCE {count_run} TIMES")
     for _ in range(count_run):
-        # Each rollout starts from a sampled real trajectory prefix, then the
-        # model continues the dynamics in crystal tensor format.
-        init = sample_initial_crystal_sequence(displacements, model_sequence_length(data), count_steps)
+        # Reference frames now continue the same real trajectory prefix that is
+        # used to initialize the autoregressive rollout.
+        init, reference_window = sample_rollout_windows(displacements, sequence_length, count_steps)
+        reference_coords = crystal_frames_to_flat_positions(reference_window, reference_positions, atom_order)
+        xi_ref, yi_ref, jlp_ref = get_sqw_default(reference_coords, dt, step)
         predicted_displacements = model.run_crystal(count_steps, init, periodic=periodic)
         predicted_coords = crystal_frames_to_flat_positions(predicted_displacements, reference_positions, atom_order)
         xi_pred, yi_pred, jlp_pred = get_sqw_default(predicted_coords, dt, step)
+
+        if jlp_ref_mean is None:
+            jlp_ref_mean = np.zeros_like(jlp_ref)
+            jlp_mean = np.zeros_like(jlp_pred)
+        jlp_ref_mean += jlp_ref
         jlp_mean += jlp_pred
         norm += np.linalg.norm(jlp_pred - jlp_ref)
 
     norm /= count_run
+    jlp_ref_mean /= count_run
     jlp_mean /= count_run
-    return norm, xi_ref, yi_ref, jlp_ref, xi_pred, yi_pred, jlp_mean
+    return norm, xi_ref, yi_ref, jlp_ref_mean, xi_pred, yi_pred, jlp_mean
 
 
 def model_sequence_length(data):
