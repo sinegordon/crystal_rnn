@@ -48,6 +48,8 @@ X_blocks, y_blocks = make_crystal_block_samples(
 ```
 
 `X_blocks` and `y_blocks` can be passed directly to `model.train_crystal_blocks(...)`.
+Displacements are measured from per-atom equilibrium positions estimated as the
+mean positions over the loaded trajectory frames.
 
 The same preparation is available as a CLI:
 

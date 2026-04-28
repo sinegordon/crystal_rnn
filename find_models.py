@@ -16,10 +16,11 @@ from base_classes import CrystalRNNNet, DEFAULT_FLATTEN_ORDER, get_sqw
 
 
 COUNT_STEPS = 2000
+DELTA = 10000
 STEP = 10
 DT = 0.02
 HIDDEN_SIZE = 100
-DATA_LEN = 0.02
+DATA_LEN = 0.2
 BATCH_SIZE = 200
 NUM_LAYERS = 3
 COUNT_RUN = 3
@@ -79,6 +80,40 @@ def load_training_data(path):
     return loaded
 
 
+def sample_train_data(data, delta, sequence_length):
+    """Select a random consecutive frame window and its training blocks."""
+    displacements = data["displacements"]
+    X_blocks = data["X_blocks"]
+    y_blocks = data["y_blocks"]
+    frame_count = displacements.shape[0]
+    total_time_windows = frame_count - sequence_length
+    if total_time_windows <= 0:
+        raise ValueError("Need more displacement frames than sequence_length")
+    if X_blocks.shape[0] != y_blocks.shape[0]:
+        raise ValueError("X_blocks and y_blocks must contain the same number of samples")
+    if X_blocks.shape[0] % total_time_windows != 0:
+        raise ValueError("X_blocks count is inconsistent with displacements and sequence_length")
+
+    blocks_per_time_window = X_blocks.shape[0] // total_time_windows
+    if frame_count <= delta:
+        start_frame = 0
+        window_frame_count = frame_count
+    else:
+        start_frame = np.random.randint(low=0, high=frame_count - delta + 1)
+        window_frame_count = delta
+
+    start_sample = start_frame * blocks_per_time_window
+    sample_count = (window_frame_count - sequence_length) * blocks_per_time_window
+    if sample_count <= 0:
+        raise ValueError("Selected training window is too short for sequence_length")
+
+    stop_sample = start_sample + sample_count
+    print(f"TRAIN FRAMES {start_frame}:{start_frame + window_frame_count}")
+    print(f"TRAIN BLOCKS {start_sample}:{stop_sample}")
+    train_displacements = displacements[start_frame : start_frame + window_frame_count]
+    return train_displacements, X_blocks[start_sample:stop_sample], y_blocks[start_sample:stop_sample]
+
+
 def build_default_k_vectors():
     """Build the default reciprocal-space vectors used for S(q,w) scoring."""
     kmin = 2 * np.pi / (NCELLS * LATTICE_PARAMETER)
@@ -121,24 +156,18 @@ def crystal_frames_to_flat_positions(displacements, reference_positions, atom_or
     return flat.reshape(frames, atoms * 3)
 
 
-def sample_rollout_windows(displacements, sequence_length, count_steps):
-    """Sample a causally matched initial history and reference continuation."""
-    required_frames = sequence_length + count_steps
-    if displacements.shape[0] < required_frames:
-        raise ValueError("Not enough displacement frames for sequence_length + count_steps")
-
-    if displacements.shape[0] == required_frames:
+def sample_initial_crystal_sequence(displacements, sequence_length, count_steps):
+    """Sample an initial crystal displacement history for autoregression."""
+    if displacements.shape[0] <= count_steps:
         begin_index = sequence_length
     else:
-        begin_index = np.random.randint(low=sequence_length, high=displacements.shape[0] - count_steps + 1)
+        begin_index = np.random.randint(low=sequence_length, high=displacements.shape[0] - count_steps)
 
-    init = displacements[begin_index - sequence_length : begin_index].astype(np.float32)
-    reference = displacements[begin_index : begin_index + count_steps].astype(np.float32)
-    return init, reference
+    return displacements[begin_index - sequence_length : begin_index].astype(np.float32)
 
 
-def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
-    """Run crystal inference several times and compare mean S(q,w) to reference."""
+def evaluate_model(model, data, reference_displacements, count_steps, count_run, dt, step, periodic):
+    """Run inference several times and compare S(q,w) to the training window."""
     if count_run <= 0:
         raise ValueError("count_run must be positive")
 
@@ -146,33 +175,25 @@ def evaluate_model(model, data, count_steps, count_run, dt, step, periodic):
     atom_order = data["atom_order"]
     reference_positions = data["reference_positions"]
     sequence_length = model_sequence_length(data)
-    jlp_ref_mean = None
-    jlp_mean = None
+    reference_coords = crystal_frames_to_flat_positions(reference_displacements, reference_positions, atom_order)
+    xi_ref, yi_ref, jlp_ref = get_sqw_default(reference_coords, dt, step)
+    jlp_mean = np.zeros_like(jlp_ref)
     norm = 0.0
-    xi_ref = yi_ref = xi_pred = yi_pred = None
+    xi_pred = yi_pred = None
 
     print(f"INFERENCE {count_run} TIMES")
     for _ in range(count_run):
-        # Reference frames now continue the same real trajectory prefix that is
-        # used to initialize the autoregressive rollout.
-        init, reference_window = sample_rollout_windows(displacements, sequence_length, count_steps)
-        reference_coords = crystal_frames_to_flat_positions(reference_window, reference_positions, atom_order)
-        xi_ref, yi_ref, jlp_ref = get_sqw_default(reference_coords, dt, step)
+        init = sample_initial_crystal_sequence(displacements, sequence_length, count_steps)
         predicted_displacements = model.run_crystal(count_steps, init, periodic=periodic)
         predicted_coords = crystal_frames_to_flat_positions(predicted_displacements, reference_positions, atom_order)
         xi_pred, yi_pred, jlp_pred = get_sqw_default(predicted_coords, dt, step)
 
-        if jlp_ref_mean is None:
-            jlp_ref_mean = np.zeros_like(jlp_ref)
-            jlp_mean = np.zeros_like(jlp_pred)
-        jlp_ref_mean += jlp_ref
         jlp_mean += jlp_pred
         norm += np.linalg.norm(jlp_pred - jlp_ref)
 
     norm /= count_run
-    jlp_ref_mean /= count_run
     jlp_mean /= count_run
-    return norm, xi_ref, yi_ref, jlp_ref_mean, xi_pred, yi_pred, jlp_mean
+    return norm, xi_ref, yi_ref, jlp_ref, xi_pred, yi_pred, jlp_mean
 
 
 def model_sequence_length(data):
@@ -215,11 +236,17 @@ def main():
             flatten_order=DEFAULT_FLATTEN_ORDER,
         )
         predictor.batch_size = BATCH_SIZE
-        predictor.train_crystal_blocks(data["X_blocks"], data["y_blocks"], data_len=DATA_LEN)
+        train_displacements, X_train_blocks, y_train_blocks = sample_train_data(
+            data=data,
+            delta=DELTA,
+            sequence_length=model_sequence_length(data),
+        )
+        predictor.train_crystal_blocks(X_train_blocks, y_train_blocks, data_len=DATA_LEN)
 
         norm, xi_ref, yi_ref, jlp_ref, xi_pred, yi_pred, jlp_mean = evaluate_model(
             model=predictor,
             data=data,
+            reference_displacements=train_displacements,
             count_steps=args.count_steps,
             count_run=args.count_run,
             dt=DT,

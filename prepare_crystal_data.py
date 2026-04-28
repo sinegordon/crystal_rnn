@@ -46,8 +46,9 @@ def main():
         raise ValueError("Raw input currently requires box lengths; use dump input or add box metadata.")
 
     basis = FCC_CONVENTIONAL_BASIS if args.basis == "fcc" else None
+    reference_positions = positions.mean(axis=0)
     atom_order = build_crystal_atom_order(
-        reference_positions=positions[0],
+        reference_positions=reference_positions,
         crystal_shape=tuple(args.crystal_shape),
         box_lengths=box_lengths[0],
         unit_cell_atoms=args.unit_cell_atoms,
@@ -55,7 +56,7 @@ def main():
     )
     displacements = positions_to_crystal_displacements(
         positions=positions,
-        reference_positions=positions[0],
+        reference_positions=reference_positions,
         atom_order=atom_order,
         box_lengths=box_lengths,
     )
@@ -75,11 +76,12 @@ def main():
         y_blocks=y_blocks,
         displacements=displacements,
         atom_order=atom_order,
-        reference_positions=positions[0],
+        reference_positions=reference_positions,
         box_lengths=box_lengths,
         crystal_shape=np.asarray(args.crystal_shape, dtype=np.int64),
         train_supercell_shape=np.asarray(args.train_supercell_shape, dtype=np.int64),
         start_frame=np.asarray(args.start_frame, dtype=np.int64),
+        reference_mode=np.asarray("mean"),
     )
     print(f"Saved {output_path}")
     print(f"X_blocks shape: {X_blocks.shape}")
