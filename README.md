@@ -129,3 +129,28 @@ y_blocks.shape == (n_samples, bx, by, bz, unit_cell_atoms, 3)
 `train_crystal_blocks(...)` flattens each training block with the model's `flatten_order`, so training and `run_crystal(...)` share the same packing convention.
 
 `run_crystal(...)` is the physically structured inference interface for rectangular training supercells.
+
+## Saved Model Inference
+
+Use `infer_model.py` to run a model selected by `find_models.py`:
+
+```bash
+python infer_model.py \
+  --model-path models/mean_norm_1.8874629875305242_rrn_crystal_400.pth \
+  --data-path data.npz \
+  --output-path prediction.npz \
+  --count-steps 2000 \
+  --start-frame 5000 \
+  --reference-output \
+  --save-positions
+```
+
+`--start-frame` selects the first frame of the initial history. If the training
+sequence length is `3`, `--start-frame 5000` uses frames `5000, 5001, 5002` as
+input and starts prediction at frame `5003`.
+
+The output always contains `predicted_displacements`, `init_displacements`,
+`reference_positions`, `atom_order`, and basic inference metadata. With
+`--reference-output`, it also saves the real continuation from the dataset. With
+`--save-positions`, it saves absolute flat-position arrays in the original atom
+order for predicted, initial, and reference frames when available.
