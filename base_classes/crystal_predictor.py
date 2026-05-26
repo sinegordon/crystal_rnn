@@ -6,24 +6,50 @@ import tqdm
 from torch.utils.data import DataLoader
 
 from .datasets import RNNCustomDataset
-from .models import RNNNet
+from .models import FrameLayerRNNNet, RNNNet
+
+
+def _normalize_temporal_architecture(temporal_architecture):
+    """Validate the flat temporal model architecture."""
+    temporal_architecture = str(temporal_architecture).lower().replace("_", "-")
+    aliases = {
+        "stacked": "stacked",
+        "standard": "stacked",
+        "pytorch": "stacked",
+        "frame-layered": "frame-layered",
+        "frame": "frame-layered",
+        "time-layered": "frame-layered",
+    }
+    if temporal_architecture not in aliases:
+        raise ValueError("temporal_architecture must be 'stacked' or 'frame-layered'")
+    return aliases[temporal_architecture]
 
 
 class CrystalRNNNet:
-    def __init__(self, in_features, hidden_size, num_layers, type="RNN"):
+    def __init__(self, in_features, hidden_size, num_layers, type="RNN", temporal_architecture="stacked"):
         super().__init__()
         self.in_features = in_features
         self.num_layers = num_layers
         self.hidden_size = hidden_size
         self.rnn_type = type.upper()
-        self.model = RNNNet(self.in_features, self.hidden_size, num_layers, type=self.rnn_type)
+        self.temporal_architecture = _normalize_temporal_architecture(temporal_architecture)
+        self.model = self._build_model()
         self.lr = 0.001
         self.epochs = 50
         self.batch_size = 200
         self.train_count = 200
 
     def reset(self):
-        self.model = RNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type)
+        self.temporal_architecture = _normalize_temporal_architecture(
+            getattr(self, "temporal_architecture", "stacked")
+        )
+        self.model = self._build_model()
+
+    def _build_model(self):
+        """Create the underlying flat temporal network."""
+        if self.temporal_architecture == "frame-layered":
+            return FrameLayerRNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type)
+        return RNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type)
 
     def train(self, X_coords, y_coords, data_len=0.5):
         self.train_count = int(data_len * X_coords.shape[0])

@@ -38,6 +38,15 @@ def parse_args():
         default="models",
         help="Directory where selected models will be saved.",
     )
+    parser.add_argument(
+        "--temporal-architecture",
+        choices=["stacked", "frame-layered"],
+        default="stacked",
+        help=(
+            "Flat temporal network. 'stacked' uses PyTorch nn.RNN/GRU/LSTM num_layers; "
+            "'frame-layered' uses one separate recurrent cell per history frame."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -113,13 +122,25 @@ def plot_sqw(reference_xi, reference_yi, reference_jlp, predicted_xi, predicted_
 def save_model(model, models_dir, norm, rnn_type, data_len, count_steps):
     models_path = Path(models_dir)
     models_path.mkdir(parents=True, exist_ok=True)
-    filepath = models_path / f"mean_norm_{norm}_{rnn_type.lower()}_dcoords_{int(data_len * count_steps)}.pth"
+    temporal_architecture = getattr(model, "temporal_architecture", "stacked")
+    architecture_suffix = ""
+    if temporal_architecture != "stacked":
+        architecture_suffix = f"_temporal{temporal_architecture.replace('-', '')}"
+    filepath = (
+        models_path
+        / f"mean_norm_{norm}_{rnn_type.lower()}_dcoords{architecture_suffix}_{int(data_len * count_steps)}.pth"
+    )
     torch.save(model, filepath)
     print(f"==============> SAVE MODEL TO FILE - {filepath}")
 
 
 def main():
     args = parse_args()
+    if args.temporal_architecture == "frame-layered" and NUM_LAYERS != SEQUENCE_LENGTH:
+        raise ValueError(
+            "--temporal-architecture frame-layered requires NUM_LAYERS "
+            f"to match SEQUENCE_LENGTH ({SEQUENCE_LENGTH})"
+        )
     coords_list = load_coordinates(args.coords_path)
     dc = coords_list.mean(axis=0)
     dcoords_global = coords_list - dc
@@ -137,6 +158,7 @@ def main():
             hidden_size=HIDDEN_SIZE,
             num_layers=NUM_LAYERS,
             type=args.rnn_type.upper(),
+            temporal_architecture=args.temporal_architecture,
         )
         predictor.batch_size = BATCH_SIZE
         predictor.train(x_coords, y_coords, data_len=DATA_LEN)
