@@ -21,12 +21,6 @@ from pipelines.shared.cluster.config import defaults_from_argv
 
 LOCAL_ROOT = Path(__file__).resolve().parent
 
-DEFAULT_PAIR_FORCE_MODEL_PATH = (
-    "models333_edge_pair_force_rnn_finalhidden_rl1_force_pmean_w01_aover_w01_aunder_w001_10/"
-    "mean_norm_0.7968641992137379_rnn_pair_force_rnn_acceleration_h128_rl1_"
-    "readoutfinalhidden_bidir_shells2_n18_targetforce_accnormglobal_"
-    "pmean0.1_aover0.1_aunder0.01_op2_up2.pth"
-)
 DEFAULT_PAIR_ENERGY_MODEL_PATH = (
     "models333_pair_energy_rnn_finalhidden_rl1_force_pmean_w01_aover_w01_aunder_w001_d90k_30/"
     "mean_norm_0.6663052760722262_rnn_pair_energy_rnn_acceleration_h128_rl1_"
@@ -34,37 +28,12 @@ DEFAULT_PAIR_ENERGY_MODEL_PATH = (
     "pmean0.1_aover0.1_aunder0.01_op2_up2.pth"
 )
 DEFAULT_DATA_PATH = "data1055.npz"
-DEFAULT_PAIR_FORCE_LABEL = "pair_force_finalhidden_rl1_sqw0797_tau50_qnone_50000"
 DEFAULT_PAIR_ENERGY_LABEL = "pair_energy_finalhidden_sqw0666_bussi200_qnone_nointernal_10000"
-DEFAULT_STATE_PATH = LOCAL_ROOT / "logs/ase1055_rl1_50000_last_job.json"
+DEFAULT_STATE_PATH = LOCAL_ROOT / "logs/ase1055_pair_energy_last_job.json"
 
 
 def preset_defaults(preset: str) -> dict[str, object]:
     """Return model and thermostat defaults for a named ASE run preset."""
-    if preset == "pair-force":
-        return {
-            "model_path": DEFAULT_PAIR_FORCE_MODEL_PATH,
-            "label": DEFAULT_PAIR_FORCE_LABEL,
-            "steps": 10000,
-            "taut_fs": 500.0,
-            "q_zero_mode": "none",
-            "history_damping_mode": "none",
-            "history_damping_eta": 0.0,
-            "history_damping_interval": 10,
-            "history_damping_batch_size": 32,
-            "history_damping_adaptive_gain": 0.0,
-            "temperature_eta_adaptive_mode": "none",
-            "temperature_eta_adaptive_gain": 0.0,
-            "temperature_eta_adaptive_interval": 100,
-            "temperature_eta_adaptive_ema": 0.002,
-            "temperature_eta_adaptive_min_eta": 0.0,
-            "temperature_eta_adaptive_max_eta": None,
-            "temperature_eta_adaptive_deadband": 0.0,
-            "power_bias_correction_mode": "none",
-            "power_bias_correction_alpha": 1.0,
-            "power_bias_correction_epsilon": 1e-30,
-            "acceleration_scale": 1.0,
-        }
     if preset == "pair-energy":
         return {
             "model_path": DEFAULT_PAIR_ENERGY_MODEL_PATH,
@@ -97,12 +66,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
     parser.add_argument(
         "--preset",
-        choices=["pair-force", "pair-energy"],
-        default="pair-force",
-        help=(
-            "Named run preset. 'pair-force' preserves the previous RL1 defaults; "
-            "'pair-energy' uses the current conservative energy model with clean Bussi NVT defaults."
-        ),
+        choices=["pair-energy"],
+        default="pair-energy",
+        help="Named run preset. This branch exposes only the conservative pair-energy model.",
     )
     parser.add_argument("--host", default=cluster["host"])
     parser.add_argument("--port", default=cluster["port"])

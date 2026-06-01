@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Submit a pair-force or pair-energy model-search Slurm array."""
+"""Submit a pair-energy model-search Slurm array."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     """Parse command-line options."""
     cluster_parent, cluster = defaults_from_argv()
     parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
-    parser.add_argument("--architecture", choices=["pair-force", "pair-energy"], default=default_architecture)
+    parser.add_argument("--architecture", choices=["pair-energy"], default=default_architecture or "pair-energy")
     parser.add_argument("--host", default=cluster["host"])
     parser.add_argument("--port", default=cluster["port"])
     parser.add_argument("--identity-file", default=cluster["identity_file"])
@@ -70,8 +70,6 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--cpus-per-task", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.architecture is None:
-        parser.error("--architecture is required when using the shared submitter directly")
     return args
 
 

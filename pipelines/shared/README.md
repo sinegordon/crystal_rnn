@@ -1,6 +1,6 @@
-# Shared Pipeline Utilities
+# Shared Pair-Energy Pipeline Utilities
 
-Shared tools are used by more than one paradigm:
+Shared tools support the `pair_energy` public entrypoints:
 
 - data import and diagnostics;
 - ASE NVT execution;

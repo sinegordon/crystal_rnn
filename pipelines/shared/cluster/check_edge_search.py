@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check pair-force or pair-energy Slurm-array search progress."""
+"""Check pair-energy Slurm-array search progress."""
 
 from __future__ import annotations
 

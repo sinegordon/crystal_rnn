@@ -3,14 +3,13 @@
 - `cluster_config.json`: the default local cluster configuration used by
   pipeline submit/check/fetch scripts.
 - `config.py`: shared JSON loader for cluster defaults.
-- `submit_edge_search.py`: local submitter for pair-force and pair-energy
-  Slurm-array searches through `cluster/run_edge_rnn_search.sh`.
-- `check_edge_search.py`: local checker for pair-force and pair-energy search
+- `submit_edge_search.py`: local submitter for pair-energy Slurm-array searches
+  through `cluster/run_edge_rnn_search.sh`.
+- `check_edge_search.py`: local checker for pair-energy search
   progress and current `top10.txt`.
-- `run_cluster_ase_1055.py`: generic submit/wait/fetch wrapper for ASE 1055
-  inference.
 
-Paradigm-specific folders call these helpers with fixed defaults.
+The public `pipelines/pair_energy/...` entrypoints call these helpers with
+fixed pair-energy defaults.
 
 ## Configuration
 
