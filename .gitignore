@@ -4,3 +4,11 @@ __pycache__/
 coords_lmp.raw
 *.npz
 models/
+inference_outputs/
+logs/
+reports/
+.mplconfig/
+*.docx
+models*/
+old_models/
+rollback_from_cluster_*/

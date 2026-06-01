@@ -30,11 +30,11 @@ class RNNAutoEncoder(nn.Module):
 
 
 class RNNNet(nn.Module):
-    def __init__(self, in_features, hidden_size, num_layers, autoencoder=None, type="RNN"):
+    def __init__(self, in_features, hidden_size, num_layers, autoencoder=None, type="RNN", out_features=None):
         super().__init__()
         self.hidden_size = hidden_size
         self.in_features = in_features
-        self.out_features = in_features
+        self.out_features = in_features if out_features is None else int(out_features)
         self.num_layers = num_layers
         self.rnn_type = type.upper()
         self.encoder = None
@@ -81,6 +81,106 @@ class RNNNet(nn.Module):
 
         hh = torch.cat((h[-2, :, :], h[-1, :, :]), dim=1)
         z = self.out(hh)
+
+        if self.decoder is not None:
+            z = self.decoder(z)
+        return z
+
+
+class FrameLayerRNNNet(nn.Module):
+    """Flat recurrent model with separate recurrent cells for each history frame.
+
+    Standard ``nn.RNN(num_layers=N)`` stacks N recurrent layers and every layer
+    still processes every time step.  This experimental model instead uses N
+    time-specific recurrent cells:
+
+        h_0 = cell_0(x_0, h_init)
+        h_1 = cell_1(x_1, h_0)
+        ...
+
+    so frame ``t`` is handled by its own parameter set.  The backward direction
+    mirrors the same idea from the last history frame to the first one.
+    """
+
+    def __init__(
+        self,
+        in_features,
+        hidden_size,
+        num_layers,
+        autoencoder=None,
+        type="RNN",
+        out_features=None,
+        bidirectional=True,
+    ):
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.in_features = int(in_features)
+        self.out_features = self.in_features if out_features is None else int(out_features)
+        self.num_layers = int(num_layers)
+        if self.num_layers <= 0:
+            raise ValueError("num_layers must be positive")
+        self.rnn_type = type.upper()
+        self.bidirectional = bool(bidirectional)
+        self.encoder = None
+        self.decoder = None
+
+        if autoencoder is not None:
+            self.encoder = autoencoder.encoder
+            self.decoder = autoencoder.decoder
+
+        if self.rnn_type == "GRU":
+            cell_cls = nn.GRUCell
+        elif self.rnn_type == "LSTM":
+            cell_cls = nn.LSTMCell
+        elif self.rnn_type == "RNN":
+            cell_cls = nn.RNNCell
+        else:
+            raise ValueError("type must be 'RNN', 'GRU', or 'LSTM'")
+
+        self.forward_cells = nn.ModuleList(
+            cell_cls(self.in_features, self.hidden_size) for _ in range(self.num_layers)
+        )
+        if self.bidirectional:
+            self.backward_cells = nn.ModuleList(
+                cell_cls(self.in_features, self.hidden_size) for _ in range(self.num_layers)
+            )
+            readout_width = self.hidden_size * 2
+        else:
+            self.backward_cells = None
+            readout_width = self.hidden_size
+        self.out = nn.Linear(readout_width, self.out_features)
+
+    def _initial_state(self, batch_size, device, dtype):
+        hidden = torch.zeros(batch_size, self.hidden_size, device=device, dtype=dtype)
+        if self.rnn_type == "LSTM":
+            cell = torch.zeros(batch_size, self.hidden_size, device=device, dtype=dtype)
+            return hidden, cell
+        return hidden
+
+    def _run_cells(self, x, cells, reverse=False):
+        state = self._initial_state(x.shape[0], x.device, x.dtype)
+        indices = range(self.num_layers - 1, -1, -1) if reverse else range(self.num_layers)
+        for cell_index in indices:
+            state = cells[cell_index](x[:, cell_index, :], state)
+        if self.rnn_type == "LSTM":
+            return state[0]
+        return state
+
+    def forward(self, x):
+        if self.encoder is not None:
+            x = self.encoder(x)
+        if x.ndim != 3:
+            raise ValueError("FrameLayerRNNNet expects input shape (batch, sequence, features)")
+        if x.shape[1] != self.num_layers:
+            raise ValueError("FrameLayerRNNNet sequence length must equal num_layers")
+
+        forward_hidden = self._run_cells(x, self.forward_cells, reverse=False)
+        if self.bidirectional:
+            backward_hidden = self._run_cells(x, self.backward_cells, reverse=True)
+            readout = torch.cat((forward_hidden, backward_hidden), dim=1)
+        else:
+            readout = forward_hidden
+        z = self.out(readout)
 
         if self.decoder is not None:
             z = self.decoder(z)

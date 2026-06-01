@@ -1,6 +1,13 @@
 import numpy as np
 
 
+AMU_ANGSTROM_PER_PS2_TO_EV_PER_ANGSTROM = 1.0364269656262175e-4
+"""Conversion factor from ``amu * Angstrom / ps^2`` to ``eV / Angstrom``."""
+
+CU_MASS_AMU = 63.546
+"""Default copper atomic mass used for force-to-acceleration conversion."""
+
+
 FCC_CONVENTIONAL_BASIS = np.array(
     [
         [0.0, 0.0, 0.0],
@@ -64,8 +71,39 @@ def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True, start_fra
     if start_frame < 0:
         raise ValueError("start_frame must be non-negative")
 
+    arrays = read_lammps_dump_arrays(
+        path,
+        max_frames=max_frames,
+        sort_by_id=sort_by_id,
+        start_frame=start_frame,
+        read_forces=False,
+    )
+    return arrays["positions"], arrays["box_lengths"]
+
+
+def read_lammps_dump_arrays(path, max_frames=None, sort_by_id=True, start_frame=0, read_forces=True, require_forces=False):
+    """Read positions and optional forces from a LAMMPS dump trajectory.
+
+    Args:
+        path: Path to a LAMMPS dump file.
+        max_frames: Optional maximum number of frames to read.
+        sort_by_id: Whether to sort atoms by atom id inside each frame.
+        start_frame: Number of initial frames to skip before collecting frames.
+        read_forces: If true, read ``fx fy fz`` when those columns are present.
+        require_forces: If true, raise an error when force columns are absent.
+
+    Returns:
+        Dictionary with ``positions`` and ``box_lengths`` arrays.  When force
+        columns are available and requested, ``forces_ev_per_ang`` is also
+        present with shape ``(frames, atoms, 3)``.
+    """
+    if start_frame < 0:
+        raise ValueError("start_frame must be non-negative")
+
     frames = []
     boxes = []
+    forces_frames = []
+    saw_force_columns = False
     seen_frames = 0
 
     with open(path) as file:
@@ -97,9 +135,16 @@ def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True, start_fra
             x_column = columns.index("x")
             y_column = columns.index("y")
             z_column = columns.index("z")
+            force_columns = None
+            if read_forces and all(name in columns for name in ("fx", "fy", "fz")):
+                force_columns = (columns.index("fx"), columns.index("fy"), columns.index("fz"))
+                saw_force_columns = True
+            elif require_forces:
+                raise ValueError("LAMMPS dump does not contain fx fy fz columns")
 
             ids = []
             positions = []
+            forces = []
             for _ in range(atom_count):
                 values = file.readline().split()
                 if id_column is not None:
@@ -111,20 +156,44 @@ def read_lammps_dump_positions(path, max_frames=None, sort_by_id=True, start_fra
                         float(values[z_column]),
                     ]
                 )
+                if force_columns is not None:
+                    forces.append(
+                        [
+                            float(values[force_columns[0]]),
+                            float(values[force_columns[1]]),
+                            float(values[force_columns[2]]),
+                        ]
+                    )
 
             positions = np.asarray(positions, dtype=np.float32)
+            if force_columns is not None:
+                forces = np.asarray(forces, dtype=np.float32)
             if sort_by_id and id_column is not None:
                 order = np.argsort(np.asarray(ids))
                 positions = positions[order]
+                if force_columns is not None:
+                    forces = forces[order]
 
             if seen_frames >= start_frame:
                 frames.append(positions)
                 boxes.append(box_lengths)
+                if force_columns is not None:
+                    forces_frames.append(forces)
             seen_frames += 1
 
     if not frames:
         raise ValueError("No LAMMPS frames were read")
-    return np.stack(frames, axis=0), np.stack(boxes, axis=0)
+    result = {
+        "positions": np.stack(frames, axis=0),
+        "box_lengths": np.stack(boxes, axis=0),
+    }
+    if forces_frames:
+        if len(forces_frames) != len(frames):
+            raise ValueError("Force columns are present only for part of the selected dump frames")
+        result["forces_ev_per_ang"] = np.stack(forces_frames, axis=0)
+    elif read_forces and require_forces and not saw_force_columns:
+        raise ValueError("No force columns were read from the LAMMPS dump")
+    return result
 
 
 def build_crystal_atom_order(reference_positions, crystal_shape, box_lengths, unit_cell_atoms=None, basis_fractional=None):
@@ -247,7 +316,50 @@ def positions_to_crystal_displacements(positions, reference_positions, atom_orde
     return displacements[:, atom_order, :]
 
 
-def make_crystal_block_samples(displacements, train_supercell_shape, sequence_length, stride_shape=None, periodic=False):
+def flat_vectors_to_crystal_values(values, atom_order):
+    """Convert flat atom-vector frames to crystal-shaped vectors.
+
+    This is used for true vector quantities such as forces.  Unlike
+    displacements, vectors are not minimum-image wrapped and do not use a
+    reference frame.
+    """
+    values = np.asarray(values, dtype=np.float32)
+    if values.ndim != 3 or values.shape[2] != 3:
+        raise ValueError("values must have shape (frames, atoms, 3)")
+    atom_order = np.asarray(atom_order, dtype=np.int64)
+    if values.shape[1] != atom_order.size:
+        raise ValueError("values atom count does not match atom_order")
+    return values[:, atom_order, :]
+
+
+def forces_to_discrete_accelerations(forces_ev_per_ang, dt_ps, atom_mass_amu=CU_MASS_AMU):
+    """Convert forces in ``eV/Angstrom`` to model discrete accelerations.
+
+    The RNN/ASE integration uses a Verlet-like update,
+
+        ``u[n + 1] = 2*u[n] - u[n - 1] + a_discrete[n]``.
+
+    For forces from LAMMPS ``units metal`` the corresponding discrete
+    acceleration is ``F * dt_ps**2 / (mass * conversion_factor)``.
+    """
+    if dt_ps <= 0:
+        raise ValueError("dt_ps must be positive")
+    if atom_mass_amu <= 0:
+        raise ValueError("atom_mass_amu must be positive")
+    forces_ev_per_ang = np.asarray(forces_ev_per_ang, dtype=np.float32)
+    scale = float(dt_ps) ** 2 / (float(atom_mass_amu) * AMU_ANGSTROM_PER_PS2_TO_EV_PER_ANGSTROM)
+    return (forces_ev_per_ang * scale).astype(np.float32)
+
+
+def make_crystal_block_samples(
+    displacements,
+    train_supercell_shape,
+    sequence_length,
+    stride_shape=None,
+    periodic=False,
+    target_fields=None,
+    target_frame_offset=None,
+):
     """Create crystal block samples for `CrystalRNNNet.train_crystal_blocks`.
 
     Args:
@@ -258,6 +370,11 @@ def make_crystal_block_samples(displacements, train_supercell_shape, sequence_le
         stride_shape: Origin stride in unit-cell coordinates. Defaults to
             `(1, 1, 1)`.
         periodic: Whether supercell blocks may wrap around crystal boundaries.
+        target_fields: Optional frame-aligned crystal fields used for output
+            blocks instead of next-frame displacements.
+        target_frame_offset: Frame offset from each input-window start used
+            for ``target_fields``.  For force-derived Verlet acceleration
+            targets this should be ``sequence_length - 1``.
 
     Returns:
         A tuple `(X_blocks, y_blocks)` ready for `train_crystal_blocks`.
@@ -267,14 +384,23 @@ def make_crystal_block_samples(displacements, train_supercell_shape, sequence_le
     stride_shape = (1, 1, 1) if stride_shape is None else _shape3(stride_shape, "stride_shape")
     crystal_shape = tuple(displacements.shape[1:4])
     origins = _build_origins(crystal_shape, train_supercell_shape, stride_shape, periodic)
-    if displacements.shape[0] <= sequence_length:
+    target_fields = displacements if target_fields is None else np.asarray(target_fields, dtype=np.float32)
+    if target_frame_offset is None:
+        target_frame_offset = sequence_length
+    target_frame_offset = int(target_frame_offset)
+    if target_frame_offset < 0:
+        raise ValueError("target_frame_offset must be non-negative")
+    if target_fields.shape[1:] != displacements.shape[1:]:
+        raise ValueError("target_fields crystal shape must match displacements")
+    sample_windows = min(displacements.shape[0] - sequence_length, target_fields.shape[0] - target_frame_offset)
+    if sample_windows <= 0:
         raise ValueError("Need more frames than sequence_length")
 
     X_blocks = []
     y_blocks = []
-    for time_index in range(displacements.shape[0] - sequence_length):
+    for time_index in range(sample_windows):
         history = displacements[time_index : time_index + sequence_length]
-        target = displacements[time_index + sequence_length]
+        target = target_fields[time_index + target_frame_offset]
         for origin in origins:
             index = _supercell_index(origin, train_supercell_shape, crystal_shape, periodic)
             X_blocks.append(history[(slice(None), *index, slice(None), slice(None))])
