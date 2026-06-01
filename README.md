@@ -31,7 +31,8 @@ kept as a force/work consistency diagnostic.
 
 See [pipelines/README.md](pipelines/README.md) and
 [pipelines/pair_energy/README.md](pipelines/pair_energy/README.md) for full
-commands.
+commands.  The energy-network architecture is summarized in
+[ENERGY_MODEL_ARCHITECTURE.docx](ENERGY_MODEL_ARCHITECTURE.docx).
 
 ## Dataset
 
