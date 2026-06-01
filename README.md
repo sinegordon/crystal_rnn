@@ -22,9 +22,9 @@ opposite contributions to the two atoms.
 
 Architecture references:
 
-- [ENERGY_MODEL_ARCHITECTURE.docx](ENERGY_MODEL_ARCHITECTURE.docx)
-- [PAIR_ENERGY_ARCHITECTURE.svg](PAIR_ENERGY_ARCHITECTURE.svg)
-- [PAIR_ENERGY_ARCHITECTURE.png](PAIR_ENERGY_ARCHITECTURE.png)
+- [ENERGY_MODEL_ARCHITECTURE.docx](pipelines/pair_energy/docs/ENERGY_MODEL_ARCHITECTURE.docx)
+- [PAIR_ENERGY_ARCHITECTURE.svg](pipelines/pair_energy/docs/PAIR_ENERGY_ARCHITECTURE.svg)
+- [PAIR_ENERGY_ARCHITECTURE.png](pipelines/pair_energy/docs/PAIR_ENERGY_ARCHITECTURE.png)
 
 ## Cluster Configuration
 

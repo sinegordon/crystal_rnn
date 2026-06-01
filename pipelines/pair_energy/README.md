@@ -14,6 +14,12 @@ differentiating it.  This is the conservative pair paradigm.
 - `postprocess/plot_etot_heat_capacity.py`: direct `E_tot` heat-capacity
   diagnostic for energy-aware ASE outputs.
 
+## Architecture References
+
+- `docs/ENERGY_MODEL_ARCHITECTURE.docx`: architecture description document.
+- `docs/PAIR_ENERGY_ARCHITECTURE.svg`: editable vector architecture diagram.
+- `docs/PAIR_ENERGY_ARCHITECTURE.png`: rendered architecture diagram.
+
 ## Recommended Inference Defaults
 
 The current best-tested path is a clean Bussi NVT run:
