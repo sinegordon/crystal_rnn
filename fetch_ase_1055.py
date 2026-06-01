@@ -13,13 +13,11 @@ import sys
 import time
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parent
 DEFAULT_STATE_PATH = LOCAL_ROOT / "logs/ase1055_rl1_50000_last_job.json"
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
 DEFAULT_OUTPUT_ROOT = "inference_outputs/ase_nvt_1055/pair_force_finalhidden_rl1_sqw0797_tau50_qnone_50000"
 
 POSTPROCESS_PATTERNS = ["*.png", "*.txt", "*.tsv", "*.log"]
@@ -39,7 +37,8 @@ PLOTS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    cluster_parent, cluster = defaults_from_argv()
+    parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
     parser.add_argument("--state-path", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--job-id", default=None)
     parser.add_argument("--host", default=None)
@@ -53,7 +52,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-lines", type=int, default=12)
     parser.add_argument("--no-fetch", action="store_true", help="Only check status and print remote progress.")
     parser.add_argument("--open-images", action="store_true", help="Open fetched PNG files on macOS.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.cluster_defaults = cluster
+    return args
 
 
 def load_state(path: str) -> dict[str, object]:
@@ -82,6 +83,8 @@ def remote_cd_path(path: str) -> str:
 
 
 def merged_config(args: argparse.Namespace, state: dict[str, object]) -> dict[str, str]:
+    cluster = args.cluster_defaults
+
     def value(name: str, default: str) -> str:
         arg_value = getattr(args, name.replace("-", "_"), None)
         if arg_value is not None:
@@ -93,10 +96,10 @@ def merged_config(args: argparse.Namespace, state: dict[str, object]) -> dict[st
 
     return {
         "job_id": value("job-id", ""),
-        "host": value("host", DEFAULT_HOST),
-        "port": value("port", DEFAULT_PORT),
-        "identity_file": value("identity-file", DEFAULT_KEY),
-        "remote_workdir": value("remote-workdir", DEFAULT_REMOTE_WORKDIR),
+        "host": value("host", cluster["host"]),
+        "port": value("port", cluster["port"]),
+        "identity_file": value("identity-file", cluster["identity_file"]),
+        "remote_workdir": value("remote-workdir", cluster["remote_workdir"]),
         "remote_output_root": value("remote-output-root", DEFAULT_OUTPUT_ROOT),
         "local_output_root": value("local-output-root", str(LOCAL_ROOT / value("remote-output-root", DEFAULT_OUTPUT_ROOT))),
     }

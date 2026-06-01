@@ -9,28 +9,29 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    cluster_parent, cluster = defaults_from_argv()
+    parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
     parser.add_argument("--state-path", default=None)
-    parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", default=DEFAULT_PORT)
-    parser.add_argument("--identity-file", default=DEFAULT_KEY)
-    parser.add_argument("--remote-workdir", default=DEFAULT_REMOTE_WORKDIR)
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", default=None)
+    parser.add_argument("--identity-file", default=None)
+    parser.add_argument("--remote-workdir", default=None)
     parser.add_argument("--array-job-id", default="")
     parser.add_argument("--collect-job-id", default="")
     parser.add_argument("--output-root", default="")
     parser.add_argument("--models-dir", default="")
     parser.add_argument("--tail-lines", type=int, default=30)
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.cluster_defaults = cluster
+    return args
 
 
 def expanded(path: str) -> str:
@@ -61,11 +62,12 @@ def load_state(path: str | None) -> dict[str, str]:
 
 def merge_config(args: argparse.Namespace, state: dict[str, str]) -> dict[str, str]:
     """Merge explicit CLI values with saved state."""
+    cluster = args.cluster_defaults
     return {
-        "host": args.host or state.get("host", DEFAULT_HOST),
-        "port": args.port or state.get("port", DEFAULT_PORT),
-        "identity_file": args.identity_file or state.get("identity_file", DEFAULT_KEY),
-        "remote_workdir": args.remote_workdir or state.get("remote_workdir", DEFAULT_REMOTE_WORKDIR),
+        "host": args.host or state.get("host", cluster["host"]),
+        "port": args.port or state.get("port", cluster["port"]),
+        "identity_file": args.identity_file or state.get("identity_file", cluster["identity_file"]),
+        "remote_workdir": args.remote_workdir or state.get("remote_workdir", cluster["remote_workdir"]),
         "array_job_id": args.array_job_id or state.get("array_job_id", ""),
         "collect_job_id": args.collect_job_id or state.get("collect_job_id", ""),
         "output_root": args.output_root or state.get("output_root", ""),

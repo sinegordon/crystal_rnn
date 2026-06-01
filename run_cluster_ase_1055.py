@@ -13,16 +13,11 @@ import sys
 import time
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parent
 
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
-DEFAULT_NODELIST = "node54.cluster"
-DEFAULT_PARTITION = "gold-batch"
-DEFAULT_CONDA_ENV = "torch"
 DEFAULT_MODEL = (
     "models333_field_rnn_accnorm_cl2_d30k_ep100/"
     "mean_norm_0.9217232867679755_rnn_field_rnn_acceleration_ec32_rh64_rl1_bidir_accnormchannel_cl2_k3.pth"
@@ -37,19 +32,21 @@ class CommandError(RuntimeError):
 def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    cluster_parent, cluster = defaults_from_argv()
     parser = argparse.ArgumentParser(
         description=(
             "Run ASE FieldRNN NVT inference on data1055.npz at the cluster, wait for SLURM, "
             "fetch plots/metrics, and print the final summary."
-        )
+        ),
+        parents=[cluster_parent],
     )
-    parser.add_argument("--host", default=DEFAULT_HOST, help="SSH destination, e.g. user@host.")
-    parser.add_argument("--port", default=DEFAULT_PORT, help="SSH port.")
-    parser.add_argument("--identity-file", default=DEFAULT_KEY, help="SSH private key path.")
-    parser.add_argument("--remote-workdir", default=DEFAULT_REMOTE_WORKDIR, help="Remote repository/work dir.")
-    parser.add_argument("--partition", default=DEFAULT_PARTITION, help="SLURM partition.")
-    parser.add_argument("--nodelist", default=DEFAULT_NODELIST, help="SLURM node constraint. Empty disables it.")
-    parser.add_argument("--conda-env", default=DEFAULT_CONDA_ENV, help="Remote conda environment.")
+    parser.add_argument("--host", default=cluster["host"], help="SSH destination, e.g. user@host.")
+    parser.add_argument("--port", default=cluster["port"], help="SSH port.")
+    parser.add_argument("--identity-file", default=cluster["identity_file"], help="SSH private key path.")
+    parser.add_argument("--remote-workdir", default=cluster["remote_workdir"], help="Remote repository/work dir.")
+    parser.add_argument("--partition", default=cluster["partition"], help="SLURM partition.")
+    parser.add_argument("--nodelist", default=cluster["nodelist"], help="SLURM node constraint. Empty disables it.")
+    parser.add_argument("--conda-env", default=cluster["conda_env"], help="Remote conda environment.")
     parser.add_argument("--model-path", default=DEFAULT_MODEL, help="Remote model path, relative to remote workdir.")
     parser.add_argument("--data-path", default=DEFAULT_DATA, help="Remote dataset path, relative to remote workdir.")
     parser.add_argument("--label", default=f"ase1055_{timestamp}", help="Run label used in the output path.")

@@ -1,0 +1,18 @@
+{
+  "ssh": {
+    "host": "sinegordon@cluster.vstu.ru",
+    "port": "57322",
+    "identity_file": "~/.ssh/id_ed25519_cluster_vstu"
+  },
+  "paths": {
+    "remote_workdir": "~/crystal_rnn_accnorm"
+  },
+  "slurm": {
+    "default_partition": "gold-batch",
+    "gpu_nodelist": "node54.cluster",
+    "train_partition": "gold-batch",
+    "train_nodelist": "node54.cluster",
+    "collect_partition": "gold-batch",
+    "conda_env": "torch"
+  }
+}

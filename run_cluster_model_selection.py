@@ -13,17 +13,10 @@ import sys
 import time
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parent
-
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
-DEFAULT_TRAIN_NODELIST = "node54.cluster"
-DEFAULT_TRAIN_PARTITION = "gold-batch"
-DEFAULT_COLLECT_PARTITION = "gold-batch"
-DEFAULT_CONDA_ENV = "torch"
 
 
 class CommandError(RuntimeError):
@@ -33,17 +26,19 @@ class CommandError(RuntimeError):
 def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    cluster_parent, cluster = defaults_from_argv()
     parser = argparse.ArgumentParser(
         description=(
             "Run cluster FieldRNN model selection through the existing Slurm array script, "
             "wait for array+collector completion, fetch results, and print top models."
-        )
+        ),
+        parents=[cluster_parent],
     )
-    parser.add_argument("--host", default=DEFAULT_HOST, help="SSH destination, e.g. user@host.")
-    parser.add_argument("--port", default=DEFAULT_PORT, help="SSH port.")
-    parser.add_argument("--identity-file", default=DEFAULT_KEY, help="SSH private key path.")
-    parser.add_argument("--remote-workdir", default=DEFAULT_REMOTE_WORKDIR, help="Remote repository/work dir.")
-    parser.add_argument("--conda-env", default=DEFAULT_CONDA_ENV, help="Remote conda environment.")
+    parser.add_argument("--host", default=cluster["host"], help="SSH destination, e.g. user@host.")
+    parser.add_argument("--port", default=cluster["port"], help="SSH port.")
+    parser.add_argument("--identity-file", default=cluster["identity_file"], help="SSH private key path.")
+    parser.add_argument("--remote-workdir", default=cluster["remote_workdir"], help="Remote repository/work dir.")
+    parser.add_argument("--conda-env", default=cluster["conda_env"], help="Remote conda environment.")
     parser.add_argument("--run-label", default=f"field_rnn_selection_{timestamp}", help="Run label.")
     parser.add_argument("--output-root", default=None, help="Remote output dir. Defaults to inference_outputs/RUN_LABEL.")
     parser.add_argument("--models-dir", default=None, help="Remote models dir. Defaults to models333_RUN_LABEL.")
@@ -109,9 +104,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--velocity-hist-bins", type=int, default=80)
     parser.add_argument("--velocity-max-end-speed-ratio", default="inf")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--train-partition", default=DEFAULT_TRAIN_PARTITION)
-    parser.add_argument("--collect-partition", default=DEFAULT_COLLECT_PARTITION)
-    parser.add_argument("--train-nodelist", default=DEFAULT_TRAIN_NODELIST, help="Node for array jobs. Empty disables.")
+    parser.add_argument("--train-partition", default=cluster["train_partition"])
+    parser.add_argument("--collect-partition", default=cluster["collect_partition"])
+    parser.add_argument("--train-nodelist", default=cluster["train_nodelist"], help="Node for array jobs. Empty disables.")
     parser.add_argument("--collect-nodelist", default="", help="Optional node for collector job.")
     parser.add_argument("--train-time", default="06:00:00")
     parser.add_argument("--collect-time", default="00:20:00")

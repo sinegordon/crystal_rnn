@@ -33,6 +33,20 @@ The clean ASE inference preset is:
 - `q_zero_mode = none`;
 - no history damping, adaptive eta, curl correction, or power-bias correction.
 
+## Cluster Configuration
+
+Pipeline cluster launchers read their SSH, remote path, Slurm, GPU-node, and
+conda defaults from:
+
+```text
+pipelines/shared/cluster/cluster_config.json
+```
+
+You can either edit that file, pass `--cluster-config /path/to/config.json`,
+or set `CRYSTAL_RNN_CLUSTER_CONFIG=/path/to/config.json`.  Explicit command
+line arguments such as `--host`, `--nodelist`, `--partition`, and
+`--remote-workdir` still override the config for a single run.
+
 ## End-to-End Pair-Energy Workflow
 
 Prepare force-enabled crystal data from a LAMMPS dump:

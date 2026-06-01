@@ -16,16 +16,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parent
-
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
-DEFAULT_PARTITION = "gold-batch"
-DEFAULT_NODELIST = "node54.cluster"
-DEFAULT_CONDA_ENV = "torch"
 
 DEFAULT_PAIR_FORCE_MODEL_PATH = (
     "models333_edge_pair_force_rnn_finalhidden_rl1_force_pmean_w01_aover_w01_aunder_w001_10/"
@@ -99,7 +93,8 @@ def preset_defaults(preset: str) -> dict[str, object]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    cluster_parent, cluster = defaults_from_argv()
+    parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
     parser.add_argument(
         "--preset",
         choices=["pair-force", "pair-energy"],
@@ -109,13 +104,13 @@ def parse_args() -> argparse.Namespace:
             "'pair-energy' uses the current conservative energy model with clean Bussi NVT defaults."
         ),
     )
-    parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", default=DEFAULT_PORT)
-    parser.add_argument("--identity-file", default=DEFAULT_KEY)
-    parser.add_argument("--remote-workdir", default=DEFAULT_REMOTE_WORKDIR)
-    parser.add_argument("--partition", default=DEFAULT_PARTITION)
-    parser.add_argument("--nodelist", default=DEFAULT_NODELIST)
-    parser.add_argument("--conda-env", default=DEFAULT_CONDA_ENV)
+    parser.add_argument("--host", default=cluster["host"])
+    parser.add_argument("--port", default=cluster["port"])
+    parser.add_argument("--identity-file", default=cluster["identity_file"])
+    parser.add_argument("--remote-workdir", default=cluster["remote_workdir"])
+    parser.add_argument("--partition", default=cluster["partition"])
+    parser.add_argument("--nodelist", default=cluster["nodelist"])
+    parser.add_argument("--conda-env", default=cluster["conda_env"])
     parser.add_argument("--model-path", default=None)
     parser.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     parser.add_argument("--label", default=None)

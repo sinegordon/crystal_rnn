@@ -11,22 +11,21 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from pipelines.shared.cluster.config import defaults_from_argv
+
 
 LOCAL_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_HOST = "sinegordon@cluster.vstu.ru"
-DEFAULT_PORT = "57322"
-DEFAULT_KEY = "~/.ssh/id_ed25519_cluster_vstu"
-DEFAULT_REMOTE_WORKDIR = "~/crystal_rnn_accnorm"
 
 
 def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     """Parse command-line options."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    cluster_parent, cluster = defaults_from_argv()
+    parser = argparse.ArgumentParser(description=__doc__, parents=[cluster_parent])
     parser.add_argument("--architecture", choices=["pair-force", "pair-energy"], default=default_architecture)
-    parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", default=DEFAULT_PORT)
-    parser.add_argument("--identity-file", default=DEFAULT_KEY)
-    parser.add_argument("--remote-workdir", default=DEFAULT_REMOTE_WORKDIR)
+    parser.add_argument("--host", default=cluster["host"])
+    parser.add_argument("--port", default=cluster["port"])
+    parser.add_argument("--identity-file", default=cluster["identity_file"])
+    parser.add_argument("--remote-workdir", default=cluster["remote_workdir"])
     parser.add_argument("--run-label", default=None)
     parser.add_argument("--state-path", default=None)
     parser.add_argument("--model-count", type=int, default=30)
@@ -61,12 +60,12 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--q-power-loss-exclude-q-zero", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--acceleration-over-rms-loss-weight", type=float, default=0.1)
     parser.add_argument("--acceleration-under-rms-loss-weight", type=float, default=0.01)
-    parser.add_argument("--train-partition", default="gold-batch")
-    parser.add_argument("--train-nodelist", default="node54.cluster")
+    parser.add_argument("--train-partition", default=cluster["train_partition"])
+    parser.add_argument("--train-nodelist", default=cluster["train_nodelist"])
     parser.add_argument("--train-time", default="12:00:00")
     parser.add_argument("--train-mem", default="16G")
     parser.add_argument("--train-gres", default="gpu:1")
-    parser.add_argument("--collect-partition", default="gold-batch")
+    parser.add_argument("--collect-partition", default=cluster["collect_partition"])
     parser.add_argument("--collect-time", default="00:20:00")
     parser.add_argument("--cpus-per-task", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true")
