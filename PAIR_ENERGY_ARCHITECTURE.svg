@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="980" viewBox="0 0 1400 980" role="img" aria-labelledby="title desc">
+  <title id="title">Pair-energy RNN architecture</title>
+  <desc id="desc">Architecture diagram for CrystalPairEnergyRNNNet: pair-vector histories are processed by a shared even scalar-energy RNN, differentiated by autograd, scattered to atoms, and used by ASE as forces and direct total energy.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#294B63"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F7FBFC"/>
+      <stop offset="58%" stop-color="#EEF6F1"/>
+      <stop offset="100%" stop-color="#F8F4EA"/>
+    </linearGradient>
+    <filter id="shadow" x="-8%" y="-12%" width="116%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#163244" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .title { font: 700 38px Georgia, 'Times New Roman', serif; fill: #11324D; }
+      .subtitle { font: 400 18px Georgia, 'Times New Roman', serif; fill: #4D6170; }
+      .box-title { font: 700 18px Georgia, 'Times New Roman', serif; fill: #11324D; }
+      .box-text { font: 400 15px Georgia, 'Times New Roman', serif; fill: #1F2E35; }
+      .mono { font: 500 14px 'Menlo', 'Consolas', monospace; fill: #244154; }
+      .small { font: 400 13px Georgia, 'Times New Roman', serif; fill: #48606E; }
+      .tiny { font: 400 12px Georgia, 'Times New Roman', serif; fill: #5E707A; }
+      .chip { font: 700 12px 'Menlo', 'Consolas', monospace; fill: #244154; }
+      .arrow { stroke: #294B63; stroke-width: 2.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .soft-arrow { stroke: #6D8D80; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 7 7; }
+      .panel { fill: #FFFFFF; stroke: #C7D5D9; stroke-width: 1.5; filter: url(#shadow); }
+      .input { fill: #EAF3F8; stroke: #8AB5C8; }
+      .feature { fill: #EAF6EF; stroke: #87B997; }
+      .network { fill: #FFF7E4; stroke: #D8B45E; }
+      .grad { fill: #FCEEEE; stroke: #D59A9A; }
+      .scatter { fill: #EEF0FA; stroke: #9FAAE0; }
+      .ase { fill: #F3F2EC; stroke: #B9B09C; }
+      .guarantee { fill: #F8FBF7; stroke: #B7C9B3; }
+      .warn { fill: #FFF9ED; stroke: #DFC27A; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="980" fill="url(#bg)"/>
+
+  <text x="64" y="64" class="title">Pair-energy RNN architecture</text>
+  <text x="66" y="96" class="subtitle">CrystalPairEnergyRNNNet: local history-dependent pair energy → autograd forces → ASE NVT inference</text>
+
+  <rect x="44" y="126" width="1312" height="778" rx="28" class="panel"/>
+
+  <g transform="translate(76 164)">
+    <rect width="244" height="154" rx="18" class="input"/>
+    <text x="22" y="34" class="box-title">1. Local history patch</text>
+    <text x="22" y="66" class="box-text">Atomic displacements around</text>
+    <text x="22" y="88" class="box-text">the central unit cell</text>
+    <text x="22" y="120" class="mono">(seq, 3,3,3, atoms, 3)</text>
+    <text x="22" y="142" class="small">current best: seq=3, atoms=4</text>
+  </g>
+
+  <path d="M 334 241 C 360 241, 377 241, 394 241" class="arrow"/>
+  <polygon points="418,241 394,229 394,253" fill="#294B63"/>
+
+  <g transform="translate(430 136)">
+    <rect width="304" height="210" rx="18" class="feature"/>
+    <text x="24" y="34" class="box-title">2. Pair-feature builder</text>
+    <text x="24" y="66" class="box-text">Fixed FCC stencil from reference</text>
+    <text x="24" y="88" class="box-text">positions; no absolute coords</text>
+    <text x="24" y="120" class="mono">x_ij(t) = (R_ij + u_j - u_i) / a0</text>
+    <text x="24" y="150" class="mono">(batch, atoms, 18, seq, 3)</text>
+    <text x="24" y="178" class="small">2 coordination shells: 12 + 6</text>
+  </g>
+
+  <path d="M 746 241 C 774 241, 794 241, 808 241" class="arrow"/>
+  <polygon points="832,241 808,229 808,253" fill="#294B63"/>
+
+  <g transform="translate(844 118)">
+    <rect width="366" height="246" rx="18" class="network"/>
+    <text x="24" y="34" class="box-title">3. Shared EvenPairEnergyRNN</text>
+    <text x="24" y="66" class="box-text">One recurrent network is reused</text>
+    <text x="24" y="88" class="box-text">for every oriented pair.</text>
+    <rect x="24" y="112" width="318" height="34" rx="10" fill="#FFFDF6" stroke="#E2C978"/>
+    <text x="38" y="134" class="mono">RNN / GRU / LSTM over pair history</text>
+    <rect x="24" y="156" width="318" height="34" rx="10" fill="#FFFDF6" stroke="#E2C978"/>
+    <text x="38" y="178" class="mono">readout: final hidden state</text>
+    <rect x="24" y="200" width="318" height="34" rx="10" fill="#FFFDF6" stroke="#E2C978"/>
+    <text x="38" y="222" class="mono">Linear → ELU → Linear → scalar</text>
+  </g>
+
+  <g transform="translate(930 392)">
+    <rect width="286" height="92" rx="16" fill="#FFFDF6" stroke="#D8B45E"/>
+    <text x="24" y="34" class="box-title">Even symmetrization</text>
+    <text x="24" y="66" class="mono">U_ij = 0.5 * (g(x) + g(-x))</text>
+  </g>
+
+  <path d="M 1027 364 C 1027 372, 1027 376, 1027 368" class="arrow"/>
+  <line x1="1027" y1="364" x2="1027" y2="374" class="arrow"/>
+  <polygon points="1027,392 1015,368 1039,368" fill="#294B63"/>
+
+  <g transform="translate(76 430)">
+    <rect width="304" height="188" rx="18" class="grad"/>
+    <text x="24" y="34" class="box-title">4. Autograd acceleration</text>
+    <text x="24" y="66" class="box-text">Forces are not predicted directly.</text>
+    <text x="24" y="88" class="box-text">They are gradients of pair energy</text>
+    <text x="24" y="120" class="mono">a_ij = ∂U_ij / ∂x_ij(t) / a0</text>
+    <text x="24" y="150" class="small">gradient is taken at the last</text>
+    <text x="24" y="170" class="small">time slice of the pair history</text>
+  </g>
+
+  <path d="M 930 438 C 725 540, 570 526, 418 526" class="arrow"/>
+  <polygon points="394,526 418,514 418,538" fill="#294B63"/>
+
+  <g transform="translate(440 430)">
+    <rect width="334" height="188" rx="18" class="scatter"/>
+    <text x="24" y="34" class="box-title">5. Unique-pair scatter</text>
+    <text x="24" y="66" class="box-text">Each periodic pair is used once.</text>
+    <text x="24" y="96" class="mono">atom i += a_ij</text>
+    <text x="24" y="122" class="mono">atom j -= a_ij</text>
+    <text x="24" y="152" class="small">full-crystal acceleration field:</text>
+    <text x="24" y="172" class="mono">(nx, ny, nz, atoms, 3)</text>
+  </g>
+
+  <path d="M 392 524 C 408 524, 417 524, 420 524" class="arrow"/>
+  <polygon points="440,524 418,513 418,535" fill="#294B63"/>
+
+  <g transform="translate(836 524)">
+    <rect width="380" height="184" rx="18" class="ase"/>
+    <text x="24" y="34" class="box-title">6. ASE calculator interface</text>
+    <text x="24" y="66" class="box-text">Discrete acceleration becomes force:</text>
+    <text x="24" y="96" class="mono">F = m * a_discrete / dt²</text>
+    <text x="24" y="128" class="box-text">Direct model energy diagnostic:</text>
+    <text x="24" y="158" class="mono">E_tot = Σ unique U_ij + E_kin</text>
+  </g>
+
+  <path d="M 786 524 C 810 538, 821 562, 828 594" class="arrow"/>
+  <polygon points="834,618 814,597 839,591" fill="#294B63"/>
+
+  <g transform="translate(76 672)">
+    <rect width="542" height="154" rx="18" class="guarantee"/>
+    <text x="24" y="34" class="box-title">What is built in</text>
+    <text x="24" y="66" class="box-text">• locality: 3x3x3 patch, two coordination shells</text>
+    <text x="24" y="92" class="box-text">• translation invariance: only relative pair vectors</text>
+    <text x="24" y="118" class="box-text">• zero total force: +a and -a pair scatter</text>
+    <text x="24" y="144" class="box-text">• conservative response for fixed history context</text>
+  </g>
+
+  <g transform="translate(678 736)">
+    <rect width="538" height="90" rx="18" class="warn"/>
+    <text x="24" y="34" class="box-title">Important limitation</text>
+    <text x="24" y="64" class="box-text">The scalar is history-dependent effective energy,</text>
+    <text x="24" y="84" class="box-text">not a static Born-Oppenheimer potential.</text>
+  </g>
+
+  <g transform="translate(78 852)">
+    <rect width="1138" height="34" rx="17" fill="#FFFFFF" stroke="#D9E2E4"/>
+    <text x="22" y="23" class="chip">best tested preset: RNN, bidirectional, hidden=128, layers=1, readout=final-hidden, force target, global acceleration normalization</text>
+  </g>
+
+  <text x="1134" y="934" class="tiny">crystal_rnn / pair-energy pipeline</text>
+</svg>
