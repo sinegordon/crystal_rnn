@@ -70,6 +70,17 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--temporal-architecture",
+        choices=["stacked", "frame-layered"],
+        default="stacked",
+        help=(
+            "Temporal core for pair-energy models. 'stacked' uses PyTorch "
+            "nn.RNN/GRU/LSTM num_layers; 'frame-layered' assigns each history "
+            "frame to its own recurrent cell, so rnn-layers must equal the "
+            "data sequence length."
+        ),
+    )
+    parser.add_argument(
         "--architecture",
         choices=["edge", "pair-force", "pair-energy"],
         default="edge",
@@ -576,10 +587,13 @@ def save_model(model, models_dir, norm, args):
     }.get(architecture, f"{architecture.replace('-', '_')}_rnn")
     readout_mode = getattr(model, "rnn_readout_mode", getattr(args, "rnn_readout_mode", "last-output"))
     readout_tag = "" if readout_mode == "last-output" else f"_readout{readout_mode.replace('-', '')}"
+    temporal_architecture = getattr(model, "temporal_architecture", getattr(args, "temporal_architecture", "stacked"))
+    temporal_tag = "" if temporal_architecture == "stacked" else f"_temporal{temporal_architecture.replace('-', '')}"
     filename = (
         f"mean_norm_{norm}_{args.rnn_type.lower()}_{architecture_tag}_acceleration"
         f"_h{model.hidden_size}_rl{model.rnn_layers}"
         f"{readout_tag}"
+        f"{temporal_tag}"
         f"{'_bidir' if model.bidirectional else ''}"
         f"_shells{model.neighbor_shells}_n{model.neighbor_count}"
         f"_target{training_target}"
@@ -613,6 +627,7 @@ def write_metrics(path, rows):
         "hidden_size",
         "rnn_layers",
         "rnn_readout_mode",
+        "temporal_architecture",
         "architecture",
         "bidirectional",
         "neighbor_shells",
@@ -686,6 +701,15 @@ def main():
     data = load_training_data(args.data_path)
     eval_data = data if args.eval_data_path is None else load_training_data(args.eval_data_path)
     validate_training_eval_compatibility(data, eval_data)
+    sequence_length = model_sequence_length(data)
+    if args.temporal_architecture == "frame-layered":
+        if args.architecture != "pair-energy":
+            raise ValueError("--temporal-architecture frame-layered is currently implemented only for pair-energy")
+        if args.rnn_layers != sequence_length:
+            raise ValueError(
+                "--temporal-architecture frame-layered requires --rnn-layers "
+                f"to match the data sequence length ({sequence_length})"
+            )
     rows = []
 
     for iteration in range(args.count_models):
@@ -702,23 +726,27 @@ def main():
             model_cls = CrystalEdgeFinalHiddenRNNNet
         else:
             model_cls = CrystalEdgeRNNNet
-        model = model_cls(
-            reference_positions=data["reference_positions"],
-            atom_order=data["atom_order"],
-            box_lengths=data["box_lengths"],
-            hidden_size=args.hidden_size,
-            rnn_layers=args.rnn_layers,
-            type=args.rnn_type,
-            bidirectional=args.bidirectional,
-            neighbor_shells=args.neighbor_shells,
-            cutoff_scale=args.cutoff_scale,
-            acceleration_normalization=args.acceleration_normalization,
-            rnn_readout_mode=args.rnn_readout_mode,
-            device=args.device,
-        )
+        model_kwargs = {
+            "reference_positions": data["reference_positions"],
+            "atom_order": data["atom_order"],
+            "box_lengths": data["box_lengths"],
+            "hidden_size": args.hidden_size,
+            "rnn_layers": args.rnn_layers,
+            "type": args.rnn_type,
+            "bidirectional": args.bidirectional,
+            "neighbor_shells": args.neighbor_shells,
+            "cutoff_scale": args.cutoff_scale,
+            "acceleration_normalization": args.acceleration_normalization,
+            "rnn_readout_mode": args.rnn_readout_mode,
+            "device": args.device,
+        }
+        if args.architecture == "pair-energy":
+            model_kwargs["temporal_architecture"] = args.temporal_architecture
+        model = model_cls(**model_kwargs)
         print("DEVICE =", model.torch_device)
         print("ARCHITECTURE =", args.architecture)
         print("RNN_READOUT_MODE =", model.rnn_readout_mode)
+        print("TEMPORAL_ARCHITECTURE =", getattr(model, "temporal_architecture", "stacked"))
         print("NEIGHBOR_COUNT =", model.neighbor_count)
         model.batch_size = args.batch_size
         model.epochs = args.epochs
@@ -843,6 +871,7 @@ def main():
                 "hidden_size": model.hidden_size,
                 "rnn_layers": model.rnn_layers,
                 "rnn_readout_mode": model.rnn_readout_mode,
+                "temporal_architecture": getattr(model, "temporal_architecture", "stacked"),
                 "architecture": args.architecture,
                 "bidirectional": bool(model.bidirectional),
                 "neighbor_shells": model.neighbor_shells,

@@ -56,3 +56,17 @@ The most important energy-aware outputs are:
 Path-energy plots are still generated, but for pair-energy models they are
 secondary diagnostics of force/work consistency rather than the main
 thermodynamic observable.
+
+## Experimental Frame-Layered Temporal Core
+
+The pair-energy search can use a frame-layered recurrent core:
+
+```bash
+python pipelines/pair_energy/cluster/submit_search.py \
+  --temporal-architecture frame-layered \
+  --rnn-layers 3
+```
+
+In this mode each history frame is assigned to its own recurrent cell instead
+of passing every frame through every stacked PyTorch RNN layer.  Therefore
+`--rnn-layers` must be exactly equal to the dataset `sequence_length`.

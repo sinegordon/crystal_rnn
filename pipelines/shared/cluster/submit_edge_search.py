@@ -42,6 +42,7 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--rnn-layers", type=int, default=1)
     parser.add_argument("--rnn-type", choices=["RNN", "GRU", "LSTM"], default="RNN")
     parser.add_argument("--rnn-readout-mode", choices=["last-output", "final-hidden"], default="final-hidden")
+    parser.add_argument("--temporal-architecture", choices=["stacked", "frame-layered"], default="stacked")
     parser.add_argument("--neighbor-shells", type=int, default=2)
     parser.add_argument("--cutoff-scale", type=float, default=1.05)
     parser.add_argument("--acceleration-normalization", choices=["none", "global", "channel"], default="global")
@@ -92,8 +93,10 @@ def default_run_label(args: argparse.Namespace) -> str:
     architecture = args.architecture.replace("-", "_")
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     q_power_tag = f"_qpow_w{args.q_power_loss_weight:g}" if args.q_power_loss_weight > 0 else ""
+    temporal_tag = "" if args.temporal_architecture == "stacked" else f"_{args.temporal_architecture}"
     return (
         f"{architecture}_rnn_finalhidden_rl{args.rnn_layers}_force"
+        f"{temporal_tag}"
         f"_pmean_w{args.power_mean_loss_weight:g}"
         f"{q_power_tag}"
         f"_aover_w{args.acceleration_over_rms_loss_weight:g}"
@@ -126,6 +129,7 @@ def main(default_architecture: str | None = None) -> int:
         "TRAINING_TARGET": args.training_target,
         "RNN_TYPE": args.rnn_type,
         "RNN_READOUT_MODE": args.rnn_readout_mode,
+        "TEMPORAL_ARCHITECTURE": args.temporal_architecture,
         "HIDDEN_SIZE": str(args.hidden_size),
         "RNN_LAYERS": str(args.rnn_layers),
         "NEIGHBOR_SHELLS": str(args.neighbor_shells),

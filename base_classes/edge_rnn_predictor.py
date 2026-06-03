@@ -68,6 +68,24 @@ def _normalize_rnn_readout_mode(mode):
     return aliases[mode]
 
 
+def _normalize_temporal_architecture(mode):
+    """Validate how history frames are routed through the recurrent core."""
+    mode = str(mode).lower().replace("_", "-")
+    aliases = {
+        "stacked": "stacked",
+        "standard": "stacked",
+        "pytorch": "stacked",
+        "frame": "frame-layered",
+        "framelayered": "frame-layered",
+        "frame-layered": "frame-layered",
+        "frame-layer": "frame-layered",
+        "per-frame": "frame-layered",
+    }
+    if mode not in aliases:
+        raise ValueError("temporal_architecture must be 'stacked' or 'frame-layered'")
+    return aliases[mode]
+
+
 def _select_rnn_readout(output, hidden, bidirectional, readout_mode):
     """Return either the last sequence output or the final hidden state readout."""
     if isinstance(hidden, tuple):
@@ -79,6 +97,74 @@ def _select_rnn_readout(output, hidden, bidirectional, readout_mode):
     if bidirectional:
         return torch.cat((hidden[-2], hidden[-1]), dim=1)
     return hidden[-1]
+
+
+class _FrameLayerTemporalEncoder(nn.Module):
+    """Temporal encoder with one recurrent cell assigned to each history frame.
+
+    Unlike ``nn.RNN(num_layers=N)``, which applies every layer to every time
+    step, this encoder uses exactly one cell per frame:
+    ``h_i = cell_i(x_i, h_{i-1})``.  Therefore ``sequence_length`` must match
+    ``frame_layers``.  The optional backward branch mirrors the same rule from
+    the last frame to the first frame.
+    """
+
+    def __init__(self, input_size, hidden_size, frame_layers, rnn_type, bidirectional):
+        super().__init__()
+        self.input_size = int(input_size)
+        self.hidden_size = int(hidden_size)
+        self.frame_layers = int(frame_layers)
+        if self.frame_layers <= 0:
+            raise ValueError("frame_layers must be positive")
+        self.rnn_type = _normalize_field_rnn_type(rnn_type)
+        self.bidirectional = bool(bidirectional)
+
+        if self.rnn_type == "GRU":
+            cell_cls = nn.GRUCell
+        elif self.rnn_type == "LSTM":
+            cell_cls = nn.LSTMCell
+        else:
+            cell_cls = nn.RNNCell
+
+        self.forward_cells = nn.ModuleList(
+            cell_cls(self.input_size, self.hidden_size) for _ in range(self.frame_layers)
+        )
+        if self.bidirectional:
+            self.backward_cells = nn.ModuleList(
+                cell_cls(self.input_size, self.hidden_size) for _ in range(self.frame_layers)
+            )
+            self.output_size = self.hidden_size * 2
+        else:
+            self.backward_cells = None
+            self.output_size = self.hidden_size
+
+    def _initial_state(self, batch_size, device, dtype):
+        hidden = torch.zeros(batch_size, self.hidden_size, device=device, dtype=dtype)
+        if self.rnn_type == "LSTM":
+            cell = torch.zeros(batch_size, self.hidden_size, device=device, dtype=dtype)
+            return hidden, cell
+        return hidden
+
+    def _run_cells(self, x, cells, reverse=False):
+        state = self._initial_state(x.shape[0], x.device, x.dtype)
+        indices = range(self.frame_layers - 1, -1, -1) if reverse else range(self.frame_layers)
+        for frame_index in indices:
+            state = cells[frame_index](x[:, frame_index, :], state)
+        if self.rnn_type == "LSTM":
+            return state[0]
+        return state
+
+    def forward(self, x):
+        """Return the final frame-layered hidden readout."""
+        if x.ndim != 3:
+            raise ValueError("Frame-layered temporal encoder expects input shape (batch, sequence, features)")
+        if x.shape[1] != self.frame_layers:
+            raise ValueError("Frame-layered temporal encoder sequence length must equal rnn_layers")
+        forward_hidden = self._run_cells(x, self.forward_cells, reverse=False)
+        if not self.bidirectional:
+            return forward_hidden
+        backward_hidden = self._run_cells(x, self.backward_cells, reverse=True)
+        return torch.cat((forward_hidden, backward_hidden), dim=1)
 
 
 def _normalize_positive_float(name, value):
@@ -323,7 +409,17 @@ class _EvenPairEnergyRNN(nn.Module):
     invariant under reversing the oriented pair.
     """
 
-    def __init__(self, input_size, hidden_size, rnn_layers, rnn_type, bidirectional, dropout=0.0, readout_mode="last-output"):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        rnn_layers,
+        rnn_type,
+        bidirectional,
+        dropout=0.0,
+        readout_mode="last-output",
+        temporal_architecture="stacked",
+    ):
         super().__init__()
         self.input_size = int(input_size)
         self.hidden_size = int(hidden_size)
@@ -331,15 +427,27 @@ class _EvenPairEnergyRNN(nn.Module):
         self.rnn_type = _normalize_field_rnn_type(rnn_type)
         self.bidirectional = bool(bidirectional)
         self.readout_mode = _normalize_rnn_readout_mode(readout_mode)
-        rnn_cls = {"RNN": nn.RNN, "GRU": nn.GRU, "LSTM": nn.LSTM}[self.rnn_type]
-        self.rnn = rnn_cls(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.rnn_layers,
-            batch_first=True,
-            bidirectional=self.bidirectional,
-            dropout=float(dropout) if self.rnn_layers > 1 else 0.0,
-        )
+        self.temporal_architecture = _normalize_temporal_architecture(temporal_architecture)
+        if self.temporal_architecture == "frame-layered":
+            self.rnn = None
+            self.temporal_encoder = _FrameLayerTemporalEncoder(
+                input_size=self.input_size,
+                hidden_size=self.hidden_size,
+                frame_layers=self.rnn_layers,
+                rnn_type=self.rnn_type,
+                bidirectional=self.bidirectional,
+            )
+        else:
+            rnn_cls = {"RNN": nn.RNN, "GRU": nn.GRU, "LSTM": nn.LSTM}[self.rnn_type]
+            self.rnn = rnn_cls(
+                input_size=self.input_size,
+                hidden_size=self.hidden_size,
+                num_layers=self.rnn_layers,
+                batch_first=True,
+                bidirectional=self.bidirectional,
+                dropout=float(dropout) if self.rnn_layers > 1 else 0.0,
+            )
+            self.temporal_encoder = None
         recurrent_width = self.hidden_size * (2 if self.bidirectional else 1)
         self.head = nn.Sequential(
             nn.Linear(recurrent_width, recurrent_width),
@@ -349,9 +457,12 @@ class _EvenPairEnergyRNN(nn.Module):
 
     def raw_forward(self, x):
         """Return unconstrained scalar pair energies."""
-        output, hidden = self.rnn(x)
-        readout_mode = getattr(self, "readout_mode", "last-output")
-        readout = _select_rnn_readout(output, hidden, self.bidirectional, readout_mode)
+        if getattr(self, "temporal_architecture", "stacked") == "frame-layered":
+            readout = self.temporal_encoder(x)
+        else:
+            output, hidden = self.rnn(x)
+            readout_mode = getattr(self, "readout_mode", "last-output")
+            readout = _select_rnn_readout(output, hidden, self.bidirectional, readout_mode)
         return self.head(readout).squeeze(-1)
 
     def forward(self, x):
@@ -1678,6 +1789,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         cutoff_scale=1.05,
         acceleration_normalization="global",
         rnn_readout_mode="last-output",
+        temporal_architecture="stacked",
         device="auto",
         pair_scatter_inference=True,
     ):
@@ -1696,6 +1808,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
             device=device,
             pair_scatter_inference=pair_scatter_inference,
         )
+        self.temporal_architecture = _normalize_temporal_architecture(temporal_architecture)
         self.model = _EvenPairEnergyRNN(
             input_size=3,
             hidden_size=self.hidden_size,
@@ -1703,6 +1816,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
             rnn_type=self.rnn_type,
             bidirectional=self.bidirectional,
             readout_mode=self.rnn_readout_mode,
+            temporal_architecture=self.temporal_architecture,
         ).to(self.torch_device)
         self.architecture = "pair-energy"
         self.energy_output_scale = np.asarray(1.0, dtype=np.float32)
