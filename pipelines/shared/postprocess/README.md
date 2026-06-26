@@ -11,6 +11,7 @@ Common diagnostics:
 - `plot_ase_phase_histograms.py`
 - `plot_ase_canonical_checks.py`
 - `plot_ase_sound_speed_ox.py`
+- `plot_ase_com_motion.py`
 - `plot_ase_path_energy.py`
 - `plot_ase_heat_capacity.py`
 

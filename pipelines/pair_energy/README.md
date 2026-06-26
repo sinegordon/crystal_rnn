@@ -34,7 +34,7 @@ python pipelines/pair_energy/cluster/submit_inference_1055.py \
   --dt-ps 0.002 \
   --temperature-k 300 \
   --taut-fs 200 \
-  --q-zero-mode none \
+  --q-zero-mode initial \
   --history-damping-mode none \
   --temperature-eta-adaptive-mode none \
   --power-bias-correction-mode none
@@ -57,6 +57,11 @@ Path-energy plots are still generated, but for pair-energy models they are
 secondary diagnostics of force/work consistency rather than the main
 thermodynamic observable.
 
+`--q-zero-mode initial` removes the initial spatial q=0 velocity from both the
+RNN history and ASE velocities.  It does not project the trajectory after every
+MD step.  Use `initial-every-step`, `zero-every-step`, or
+`constant-velocity-every-step` only for explicit constrained-control tests.
+
 ## Experimental Frame-Layered Temporal Core
 
 The pair-energy search can use a frame-layered recurrent core:
@@ -69,4 +74,46 @@ python pipelines/pair_energy/cluster/submit_search.py \
 
 In this mode each history frame is assigned to its own recurrent cell instead
 of passing every frame through every stacked PyTorch RNN layer.  Therefore
-`--rnn-layers` must be exactly equal to the dataset `sequence_length`.
+`--rnn-layers` must be exactly equal to the recurrent input sequence length.
+
+## Experimental Relative-To-First Temporal Input
+
+The experimental relative-history mode still reads three raw history frames,
+but the RNN receives only two recurrent steps:
+
+- step 1: raw frame 1 minus raw frame 0;
+- step 2: raw frame 2 minus raw frame 0.
+
+Pair features are then built from these relative changes without adding the
+equilibrium pair vector.  The equilibrium geometry is used only to choose the
+fixed nearest-neighbor coordination stencil.  This keeps the existing
+`--neighbor-shells`/`--cutoff-scale` neighbor selection and allows raw triplets
+to store either displacements or coordinates.
+
+For a frame-layered pair-energy search on three-frame datasets, use two
+frame layers because only two processed frames enter the recurrent block:
+
+```bash
+python pipelines/pair_energy/cluster/submit_search.py \
+  --temporal-architecture frame-layered \
+  --temporal-input-mode relative-to-first \
+  --rnn-layers 2
+```
+
+## Experimental Ref-Plus-Delta Pair Input
+
+The `ref-plus-delta` input keeps the usual history length but separates the
+large equilibrium pair vector from the small dynamic displacement difference.
+Each pair/time sample has six channels:
+
+- `R_ref/a0`;
+- `(u_neighbor-u_center)/a0`.
+
+For pair-energy models, forces are differentiated only through the dynamic
+displacement channels.  A search can be submitted with:
+
+```bash
+python pipelines/pair_energy/cluster/submit_search.py \
+  --temporal-input-mode ref-plus-delta \
+  --run-label pair_energy_ref_plus_delta_test
+```

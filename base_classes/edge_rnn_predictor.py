@@ -86,6 +86,38 @@ def _normalize_temporal_architecture(mode):
     return aliases[mode]
 
 
+def _normalize_temporal_input_mode(mode):
+    """Validate how raw history frames are converted before recurrent encoding."""
+    mode = str(mode).lower().replace("_", "-")
+    aliases = {
+        "absolute": "absolute-pair",
+        "absolute-pair": "absolute-pair",
+        "pair": "absolute-pair",
+        "default": "absolute-pair",
+        "relative": "relative-to-first",
+        "relative-first": "relative-to-first",
+        "relative-to-first": "relative-to-first",
+        "frame-relative": "relative-to-first",
+        "ref-plus-delta": "ref-plus-delta",
+        "reference-plus-delta": "ref-plus-delta",
+        "ref-delta": "ref-plus-delta",
+        "split-reference": "ref-plus-delta",
+    }
+    if mode not in aliases:
+        raise ValueError("temporal_input_mode must be 'absolute-pair', 'relative-to-first', or 'ref-plus-delta'")
+    return aliases[mode]
+
+
+def _feature_channels_for_temporal_input_mode(mode):
+    """Return the per-pair channel count for a temporal input mode."""
+    return 6 if _normalize_temporal_input_mode(mode) == "ref-plus-delta" else 3
+
+
+def _dynamic_channel_slice_for_temporal_input_mode(mode):
+    """Return channels differentiated to produce pair forces."""
+    return slice(3, 6) if _normalize_temporal_input_mode(mode) == "ref-plus-delta" else slice(0, 3)
+
+
 def _select_rnn_readout(output, hidden, bidirectional, readout_mode):
     """Return either the last sequence output or the final hidden state readout."""
     if isinstance(hidden, tuple):
@@ -486,6 +518,7 @@ class CrystalEdgeRNNNet:
         cutoff_scale=1.05,
         acceleration_normalization="channel",
         rnn_readout_mode="last-output",
+        temporal_input_mode="absolute-pair",
         device="auto",
     ):
         self.reference_positions = np.asarray(reference_positions, dtype=np.float32)
@@ -500,6 +533,8 @@ class CrystalEdgeRNNNet:
         self.cutoff_scale = _normalize_positive_float("cutoff_scale", cutoff_scale)
         self.acceleration_normalization = _normalize_acceleration_normalization(acceleration_normalization)
         self.torch_device = _resolve_torch_device(device)
+        self.temporal_input_mode = _normalize_temporal_input_mode(temporal_input_mode)
+        self.feature_channels = _feature_channels_for_temporal_input_mode(self.temporal_input_mode)
         self.unit_cell_atoms = int(self.atom_order.shape[3])
         self.patch_shape = (3, 3, 3)
         self.edge_stencil = build_edge_stencil(
@@ -514,7 +549,7 @@ class CrystalEdgeRNNNet:
         self.shell_ids = self.edge_stencil["shell_ids"]
         self.lattice_parameter = float(self.edge_stencil["lattice_parameter"])
         self.neighbor_count = int(self.neighbor_indices.shape[1])
-        self.input_size = self.unit_cell_atoms * self.neighbor_count * 3
+        self.input_size = self.unit_cell_atoms * self.neighbor_count * self.feature_channels
         self.output_size = self.unit_cell_atoms * 3
         self.model = _EdgeRNN(
             input_size=self.input_size,
@@ -553,6 +588,31 @@ class CrystalEdgeRNNNet:
         self.curl_loss_interval = 1
         self.curl_loss_epsilon = 1e-12
 
+    def _temporal_feature_patches(self, patches):
+        """Return the history frames that should be encoded by the RNN.
+
+        ``absolute-pair`` and ``ref-plus-delta`` keep the raw sequence length.
+        The experimental ``relative-to-first`` mode uses exactly three raw
+        frames but exposes only two recurrent steps: frame 1 and frame 2
+        measured relative to frame 0.  The neighbor stencil is still chosen
+        from the equilibrium geometry.
+        """
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
+        if mode in {"absolute-pair", "ref-plus-delta"}:
+            return patches
+        if patches.shape[1] != 3:
+            raise ValueError("temporal_input_mode='relative-to-first' expects exactly three history frames")
+        return patches[:, 1:] - patches[:, :1]
+
+    def _temporal_feature_patches_torch(self, patches):
+        """Torch equivalent of ``_temporal_feature_patches``."""
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
+        if mode in {"absolute-pair", "ref-plus-delta"}:
+            return patches
+        if patches.shape[1] != 3:
+            raise ValueError("temporal_input_mode='relative-to-first' expects exactly three history frames")
+        return patches[:, 1:] - patches[:, :1]
+
     def to(self, device):
         """Move the underlying torch module to a device."""
         self.torch_device = _resolve_torch_device(device)
@@ -564,21 +624,37 @@ class CrystalEdgeRNNNet:
         patches = np.asarray(patches, dtype=np.float32)
         if patches.ndim != 7:
             raise ValueError("patches must have shape (batch, sequence, 3, 3, 3, atoms, 3)")
+        patches = self._temporal_feature_patches(patches)
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
         batch_size, sequence_length = patches.shape[:2]
-        features = np.empty((batch_size, sequence_length, self.unit_cell_atoms, self.neighbor_count, 3), dtype=np.float32)
+        feature_channels = _feature_channels_for_temporal_input_mode(mode)
+        features = np.empty(
+            (batch_size, sequence_length, self.unit_cell_atoms, self.neighbor_count, feature_channels),
+            dtype=np.float32,
+        )
         center_displacements = patches[:, :, 1, 1, 1]
         for atom_index in range(self.unit_cell_atoms):
             center = center_displacements[:, :, atom_index, :]
             for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
                 neighbor = patches[(slice(None), slice(None), *tuple(local_index), slice(None))]
-                vector = self.reference_vectors[atom_index, neighbor_index] + neighbor - center
-                features[:, :, atom_index, neighbor_index, :] = vector / self.lattice_parameter
+                vector = neighbor - center
+                if mode == "absolute-pair":
+                    vector = vector + self.reference_vectors[atom_index, neighbor_index]
+                    features[:, :, atom_index, neighbor_index, :] = vector / self.lattice_parameter
+                elif mode == "ref-plus-delta":
+                    reference = np.broadcast_to(self.reference_vectors[atom_index, neighbor_index], vector.shape)
+                    features[:, :, atom_index, neighbor_index, :3] = reference / self.lattice_parameter
+                    features[:, :, atom_index, neighbor_index, 3:] = vector / self.lattice_parameter
+                else:
+                    features[:, :, atom_index, neighbor_index, :] = vector / self.lattice_parameter
         return features.reshape(batch_size, sequence_length, self.input_size)
 
     def _edge_features_from_patches_torch(self, patches):
         """Return differentiable edge features from torch displacement patches."""
         if patches.ndim != 7:
             raise ValueError("patches must have shape (batch, sequence, 3, 3, 3, atoms, 3)")
+        patches = self._temporal_feature_patches_torch(patches)
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
         features = []
         center_displacements = patches[:, :, 1, 1, 1]
         reference_vectors = torch.as_tensor(
@@ -592,8 +668,15 @@ class CrystalEdgeRNNNet:
             for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
                 lx, ly, lz, neighbor_atom = (int(value) for value in local_index)
                 neighbor = patches[:, :, lx, ly, lz, neighbor_atom, :]
-                vector = reference_vectors[atom_index, neighbor_index] + neighbor - center
-                features.append(vector / scale)
+                vector = neighbor - center
+                if mode == "absolute-pair":
+                    vector = vector + reference_vectors[atom_index, neighbor_index]
+                    features.append(vector / scale)
+                elif mode == "ref-plus-delta":
+                    reference = reference_vectors[atom_index, neighbor_index].reshape(1, 1, 3).expand_as(vector)
+                    features.append(torch.cat((reference / scale, vector / scale), dim=-1))
+                else:
+                    features.append(vector / scale)
         return torch.stack(features, dim=2).reshape(patches.shape[0], patches.shape[1], self.input_size)
 
     def _center_acceleration_from_patch_tensor(self, patches):
@@ -1254,6 +1337,7 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
         cutoff_scale=1.05,
         acceleration_normalization="global",
         rnn_readout_mode="last-output",
+        temporal_input_mode="absolute-pair",
         device="auto",
         pair_scatter_inference=True,
     ):
@@ -1269,10 +1353,11 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             cutoff_scale=cutoff_scale,
             acceleration_normalization=acceleration_normalization,
             rnn_readout_mode=rnn_readout_mode,
+            temporal_input_mode=temporal_input_mode,
             device=device,
         )
         self.model = _OddPairForceRNN(
-            input_size=3,
+            input_size=self.feature_channels,
             hidden_size=self.hidden_size,
             rnn_layers=self.rnn_layers,
             rnn_type=self.rnn_type,
@@ -1288,9 +1373,12 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
         patches = np.asarray(patches, dtype=np.float32)
         if patches.ndim != 7:
             raise ValueError("patches must have shape (batch, sequence, 3, 3, 3, atoms, 3)")
+        patches = self._temporal_feature_patches(patches)
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
         batch_size, sequence_length = patches.shape[:2]
+        feature_channels = _feature_channels_for_temporal_input_mode(mode)
         features = np.empty(
-            (batch_size, self.unit_cell_atoms, self.neighbor_count, sequence_length, 3),
+            (batch_size, self.unit_cell_atoms, self.neighbor_count, sequence_length, feature_channels),
             dtype=np.float32,
         )
         center_displacements = patches[:, :, 1, 1, 1]
@@ -1298,14 +1386,24 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             center = center_displacements[:, :, atom_index, :]
             for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
                 neighbor = patches[(slice(None), slice(None), *tuple(local_index), slice(None))]
-                vector = self.reference_vectors[atom_index, neighbor_index] + neighbor - center
-                features[:, atom_index, neighbor_index, :, :] = vector / self.lattice_parameter
+                vector = neighbor - center
+                if mode == "absolute-pair":
+                    vector = vector + self.reference_vectors[atom_index, neighbor_index]
+                    features[:, atom_index, neighbor_index, :, :] = vector / self.lattice_parameter
+                elif mode == "ref-plus-delta":
+                    reference = np.broadcast_to(self.reference_vectors[atom_index, neighbor_index], vector.shape)
+                    features[:, atom_index, neighbor_index, :, :3] = reference / self.lattice_parameter
+                    features[:, atom_index, neighbor_index, :, 3:] = vector / self.lattice_parameter
+                else:
+                    features[:, atom_index, neighbor_index, :, :] = vector / self.lattice_parameter
         return features
 
     def _edge_sequence_features_from_patches_torch(self, patches):
         """Return differentiable per-pair feature sequences from torch patches."""
         if patches.ndim != 7:
             raise ValueError("patches must have shape (batch, sequence, 3, 3, 3, atoms, 3)")
+        patches = self._temporal_feature_patches_torch(patches)
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
         per_atom_features = []
         center_displacements = patches[:, :, 1, 1, 1]
         reference_vectors = torch.as_tensor(
@@ -1320,8 +1418,15 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
                 lx, ly, lz, neighbor_atom = (int(value) for value in local_index)
                 neighbor = patches[:, :, lx, ly, lz, neighbor_atom, :]
-                vector = reference_vectors[atom_index, neighbor_index] + neighbor - center
-                neighbor_features.append(vector / scale)
+                vector = neighbor - center
+                if mode == "absolute-pair":
+                    vector = vector + reference_vectors[atom_index, neighbor_index]
+                    neighbor_features.append(vector / scale)
+                elif mode == "ref-plus-delta":
+                    reference = reference_vectors[atom_index, neighbor_index].reshape(1, 1, 3).expand_as(vector)
+                    neighbor_features.append(torch.cat((reference / scale, vector / scale), dim=-1))
+                else:
+                    neighbor_features.append(vector / scale)
             per_atom_features.append(torch.stack(neighbor_features, dim=1))
         return torch.stack(per_atom_features, dim=1)
 
@@ -1694,6 +1799,86 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             return None
         return tuple(int(value) for value in cell)
 
+    def _full_pair_scatter_indices(self, crystal_shape, periodic):
+        """Return cached unique-pair indices for vectorized full-crystal scatter."""
+        crystal_shape = tuple(int(dim) for dim in crystal_shape)
+        key = (crystal_shape, bool(periodic))
+        cache = getattr(self, "_full_pair_scatter_index_cache", None)
+        if cache is None:
+            cache = {}
+            self._full_pair_scatter_index_cache = cache
+        if key in cache:
+            return cache[key]
+
+        centers = build_centers(crystal_shape, periodic=periodic)
+        pair_center_indices = []
+        pair_atom_indices = []
+        pair_neighbor_indices = []
+        pair_center_flat_indices = []
+        pair_neighbor_flat_indices = []
+        for center_index, center in enumerate(centers):
+            for atom_index in range(self.unit_cell_atoms):
+                center_id = self._crystal_atom_id(center, atom_index, crystal_shape)
+                for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
+                    neighbor_cell = self._neighbor_global_cell(center, local_index, crystal_shape, periodic)
+                    if neighbor_cell is None:
+                        continue
+                    neighbor_atom = int(local_index[3])
+                    neighbor_id = self._crystal_atom_id(neighbor_cell, neighbor_atom, crystal_shape)
+                    if center_id >= neighbor_id:
+                        continue
+                    pair_center_indices.append(center_index)
+                    pair_atom_indices.append(atom_index)
+                    pair_neighbor_indices.append(neighbor_index)
+                    pair_center_flat_indices.append(center_id)
+                    pair_neighbor_flat_indices.append(neighbor_id)
+
+        indices = {
+            "centers": centers,
+            "center_index": np.asarray(pair_center_indices, dtype=np.int64),
+            "atom": np.asarray(pair_atom_indices, dtype=np.int64),
+            "neighbor": np.asarray(pair_neighbor_indices, dtype=np.int64),
+            "center_flat": np.asarray(pair_center_flat_indices, dtype=np.int64),
+            "neighbor_flat": np.asarray(pair_neighbor_flat_indices, dtype=np.int64),
+        }
+        cache[key] = indices
+        return indices
+
+    def _scatter_pair_contributions(
+        self,
+        acceleration_flat,
+        pair_contributions,
+        scatter_indices,
+        start,
+        stop,
+        pair_energies=None,
+    ):
+        """Scatter one batch of unique pair contributions and optionally sum energies."""
+        batch_mask = (scatter_indices["center_index"] >= start) & (scatter_indices["center_index"] < stop)
+        if not np.any(batch_mask):
+            return 0.0
+
+        batch_indices = scatter_indices["center_index"][batch_mask] - int(start)
+        atom_indices = scatter_indices["atom"][batch_mask]
+        neighbor_indices = scatter_indices["neighbor"][batch_mask]
+        center_flat = scatter_indices["center_flat"][batch_mask]
+        neighbor_flat = scatter_indices["neighbor_flat"][batch_mask]
+
+        if pair_contributions is not None:
+            contributions = pair_contributions[batch_indices, atom_indices, neighbor_indices]
+            np.add.at(acceleration_flat, center_flat, contributions)
+            np.add.at(acceleration_flat, neighbor_flat, -contributions)
+
+        if pair_energies is None:
+            return 0.0
+        return float(np.sum(pair_energies[batch_indices, atom_indices, neighbor_indices], dtype=np.float64))
+
+    def _assign_center_accelerations(self, acceleration, batch_centers, pair_contributions):
+        """Assign centered accelerations for the non-pair-scatter inference mode."""
+        center_acceleration = np.sum(pair_contributions, axis=2)
+        for local_index, center in enumerate(batch_centers):
+            acceleration[(*center, slice(None), slice(None))] = center_acceleration[local_index]
+
     def predict_full_accelerations(self, history, periodic=True, patch_batch_size=250, pair_scatter=None):
         """Predict one full-crystal acceleration frame.
 
@@ -1709,33 +1894,27 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             raise ValueError("patch_batch_size must be positive")
         pair_scatter = self.pair_scatter_inference if pair_scatter is None else bool(pair_scatter)
         crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
-        centers = build_centers(crystal_shape, periodic=periodic)
+        scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic) if pair_scatter else None
+        centers = scatter_indices["centers"] if pair_scatter else build_centers(crystal_shape, periodic=periodic)
         acceleration = np.zeros_like(history[-1], dtype=np.float32)
+        acceleration_flat = acceleration.reshape(-1, 3)
 
         for start in range(0, len(centers), patch_batch_size):
+            stop = min(start + patch_batch_size, len(centers))
             batch_centers = centers[start : start + patch_batch_size]
             patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
             pair_contributions = self.predict_pair_contributions(patch_batch)
             if not pair_scatter:
-                center_acceleration = np.sum(pair_contributions, axis=2)
-                for local_index, center in enumerate(batch_centers):
-                    acceleration[(*center, slice(None), slice(None))] = center_acceleration[local_index]
+                self._assign_center_accelerations(acceleration, batch_centers, pair_contributions)
                 continue
 
-            for batch_index, center in enumerate(batch_centers):
-                for atom_index in range(self.unit_cell_atoms):
-                    center_id = self._crystal_atom_id(center, atom_index, crystal_shape)
-                    for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
-                        neighbor_cell = self._neighbor_global_cell(center, local_index, crystal_shape, periodic)
-                        if neighbor_cell is None:
-                            continue
-                        neighbor_atom = int(local_index[3])
-                        neighbor_id = self._crystal_atom_id(neighbor_cell, neighbor_atom, crystal_shape)
-                        if center_id >= neighbor_id:
-                            continue
-                        contribution = pair_contributions[batch_index, atom_index, neighbor_index]
-                        acceleration[(*center, atom_index, slice(None))] += contribution
-                        acceleration[(*neighbor_cell, neighbor_atom, slice(None))] -= contribution
+            self._scatter_pair_contributions(
+                acceleration_flat,
+                pair_contributions,
+                scatter_indices,
+                start,
+                stop,
+            )
         return acceleration
 
     def run_crystal(self, count_steps, init_displacements, periodic=True, patch_batch_size=250):
@@ -1790,6 +1969,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         acceleration_normalization="global",
         rnn_readout_mode="last-output",
         temporal_architecture="stacked",
+        temporal_input_mode="absolute-pair",
         device="auto",
         pair_scatter_inference=True,
     ):
@@ -1805,12 +1985,13 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
             cutoff_scale=cutoff_scale,
             acceleration_normalization=acceleration_normalization,
             rnn_readout_mode=rnn_readout_mode,
+            temporal_input_mode=temporal_input_mode,
             device=device,
             pair_scatter_inference=pair_scatter_inference,
         )
         self.temporal_architecture = _normalize_temporal_architecture(temporal_architecture)
         self.model = _EvenPairEnergyRNN(
-            input_size=3,
+            input_size=self.feature_channels,
             hidden_size=self.hidden_size,
             rnn_layers=self.rnn_layers,
             rnn_type=self.rnn_type,
@@ -1863,7 +2044,33 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
                     only_inputs=True,
                 )[0]
         scale = torch.as_tensor(self.lattice_parameter, dtype=gradient.dtype, device=gradient.device)
-        return gradient[..., -1, :] / scale
+        dynamic_slice = _dynamic_channel_slice_for_temporal_input_mode(
+            getattr(self, "temporal_input_mode", "absolute-pair")
+        )
+        return gradient[..., -1, dynamic_slice] / scale
+
+    def _pair_contributions_and_energies_from_features(self, features, create_graph=None):
+        """Return conservative pair contributions and the scalar pair energies."""
+        if not features.requires_grad:
+            features = features.detach().clone().requires_grad_(True)
+        if create_graph is None:
+            create_graph = bool(torch.is_grad_enabled())
+        with torch.enable_grad():
+            with torch.backends.cudnn.flags(enabled=False):
+                energies = self._pair_energies_from_features(features)
+                gradient = torch.autograd.grad(
+                    energies.sum(),
+                    features,
+                    create_graph=create_graph,
+                    retain_graph=create_graph,
+                    only_inputs=True,
+                )[0]
+        scale = torch.as_tensor(self.lattice_parameter, dtype=gradient.dtype, device=gradient.device)
+        dynamic_slice = _dynamic_channel_slice_for_temporal_input_mode(
+            getattr(self, "temporal_input_mode", "absolute-pair")
+        )
+        contributions = gradient[..., -1, dynamic_slice] / scale
+        return contributions, energies
 
     def _center_acceleration_from_features(self, features):
         """Return conservative central-cell accelerations from pair energies."""
@@ -1886,10 +2093,58 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         contributions = self._pair_contributions_from_features(tensor, create_graph=False)
         return contributions.detach().cpu().numpy().astype(np.float32)
 
+    def predict_pair_contributions_and_energies(self, patch_batch):
+        """Predict pair contributions and energies with one model/autograd pass."""
+        features = self.edge_sequence_features_from_patches(patch_batch)
+        self.model.eval()
+        tensor = torch.as_tensor(features, dtype=torch.float32, device=self.torch_device)
+        contributions, energies = self._pair_contributions_and_energies_from_features(
+            tensor,
+            create_graph=False,
+        )
+        return (
+            contributions.detach().cpu().numpy().astype(np.float32),
+            energies.detach().cpu().numpy().astype(np.float32),
+        )
+
     def predict_center_accelerations(self, patch_batch):
         """Predict central-cell accelerations by differentiating local energies."""
         contributions = self.predict_pair_contributions(patch_batch)
         return np.sum(contributions, axis=2).astype(np.float32)
+
+    def predict_full_accelerations_and_energy(self, history, periodic=True, patch_batch_size=250, pair_scatter=None):
+        """Return full-crystal accelerations and unique-pair potential in one pass."""
+        history = np.asarray(history, dtype=np.float32)
+        if history.ndim != 6:
+            raise ValueError("history must have shape (sequence, nx, ny, nz, atoms, 3)")
+        if patch_batch_size <= 0:
+            raise ValueError("patch_batch_size must be positive")
+        pair_scatter = self.pair_scatter_inference if pair_scatter is None else bool(pair_scatter)
+        crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
+        scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic) if pair_scatter else None
+        centers = scatter_indices["centers"] if pair_scatter else build_centers(crystal_shape, periodic=periodic)
+        acceleration = np.zeros_like(history[-1], dtype=np.float32)
+        acceleration_flat = acceleration.reshape(-1, 3)
+        total_energy = 0.0
+
+        for start in range(0, len(centers), patch_batch_size):
+            stop = min(start + patch_batch_size, len(centers))
+            batch_centers = centers[start:stop]
+            patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
+            pair_contributions, pair_energies = self.predict_pair_contributions_and_energies(patch_batch)
+            if not pair_scatter:
+                self._assign_center_accelerations(acceleration, batch_centers, pair_contributions)
+                total_energy += float(np.sum(pair_energies, dtype=np.float64))
+                continue
+            total_energy += self._scatter_pair_contributions(
+                acceleration_flat,
+                pair_contributions,
+                scatter_indices,
+                start,
+                stop,
+                pair_energies=pair_energies,
+            )
+        return acceleration, float(total_energy)
 
     def predict_full_potential_energy(self, history, periodic=True, patch_batch_size=250):
         """Return the unique-pair full-crystal potential in model units."""
@@ -1899,24 +2154,23 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         if patch_batch_size <= 0:
             raise ValueError("patch_batch_size must be positive")
         crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
-        centers = build_centers(crystal_shape, periodic=periodic)
+        scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic)
+        centers = scatter_indices["centers"]
         total = 0.0
 
         for start in range(0, len(centers), patch_batch_size):
-            batch_centers = centers[start : start + patch_batch_size]
+            stop = min(start + patch_batch_size, len(centers))
+            batch_centers = centers[start:stop]
             patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
             pair_energies = self.predict_pair_energies(patch_batch)
-            for batch_index, center in enumerate(batch_centers):
-                for atom_index in range(self.unit_cell_atoms):
-                    center_id = self._crystal_atom_id(center, atom_index, crystal_shape)
-                    for neighbor_index, local_index in enumerate(self.neighbor_indices[atom_index]):
-                        neighbor_cell = self._neighbor_global_cell(center, local_index, crystal_shape, periodic)
-                        if neighbor_cell is None:
-                            continue
-                        neighbor_atom = int(local_index[3])
-                        neighbor_id = self._crystal_atom_id(neighbor_cell, neighbor_atom, crystal_shape)
-                        if center_id < neighbor_id:
-                            total += float(pair_energies[batch_index, atom_index, neighbor_index])
+            total += self._scatter_pair_contributions(
+                None,
+                None,
+                scatter_indices,
+                start,
+                stop,
+                pair_energies=pair_energies,
+            )
         return float(total)
 
 

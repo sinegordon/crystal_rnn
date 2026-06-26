@@ -36,8 +36,21 @@ SQW_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_sqw.png"
 SQW_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_sqw.txt"
 VELOCITY_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_velocity_histograms.png"
 VELOCITY_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_velocity_histograms.txt"
+DISPLACEMENT_RAW_HIST_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_components_raw.png"
+DISPLACEMENT_RAW_LAYER_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_layers_raw.png"
+DISPLACEMENT_RAW_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_components_raw.txt"
+DISPLACEMENT_COMSUB_HIST_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_components_comsub.png"
+DISPLACEMENT_COMSUB_LAYER_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_layers_comsub.png"
+DISPLACEMENT_COMSUB_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_displacement_components_comsub.txt"
+VACF_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_vacf.png"
+VACF_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_vacf.tsv"
+RDF_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_rdf.png"
+RDF_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_rdf.tsv"
 TEMPERATURE_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_temperature_trace.png"
 TEMPERATURE_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_temperature_trace.txt"
+COM_MOTION_PREFIX="${OUTPUT_ROOT}/ase_nvt_1055_com_motion"
+COM_MOTION_PLOT_PATH="${COM_MOTION_PREFIX}.png"
+COM_MOTION_METRICS_PATH="${COM_MOTION_PREFIX}.txt"
 PHASE_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_phase_power_acceleration.png"
 PHASE_METRICS_PATH="${OUTPUT_ROOT}/ase_nvt_1055_phase_power_acceleration.tsv"
 CANONICAL_PLOT_PATH="${OUTPUT_ROOT}/ase_nvt_1055_canonical_checks.png"
@@ -67,6 +80,18 @@ KCOUNT="${KCOUNT:-10}"
 SQW_STEP="${SQW_STEP:-10}"
 VELOCITY_WINDOW="${VELOCITY_WINDOW:-10}"
 VELOCITY_BINS="${VELOCITY_BINS:-120}"
+DISPLACEMENT_BINS="${DISPLACEMENT_BINS:-180}"
+DISPLACEMENT_PERCENTILE="${DISPLACEMENT_PERCENTILE:-99.5}"
+DISPLACEMENT_CHUNK_FRAMES="${DISPLACEMENT_CHUNK_FRAMES:-512}"
+DISPLACEMENT_SAMPLE_FRAME_STRIDE="${DISPLACEMENT_SAMPLE_FRAME_STRIDE:-20}"
+VACF_MAX_LAG_FRAMES="${VACF_MAX_LAG_FRAMES:-2500}"
+VACF_FFT_CHUNK_SIZE="${VACF_FFT_CHUNK_SIZE:-512}"
+VACF_REMOVE_FRAME_COM="${VACF_REMOVE_FRAME_COM:-1}"
+RDF_BINS="${RDF_BINS:-220}"
+RDF_MAX_FRAMES="${RDF_MAX_FRAMES:-500}"
+RDF_R_MAX="${RDF_R_MAX:-}"
+RDF_FRAME_FRACTION_START="${RDF_FRAME_FRACTION_START:-0.0}"
+RDF_FRAME_FRACTION_END="${RDF_FRAME_FRACTION_END:-1.0}"
 PHASE_WINDOW_FRAMES="${PHASE_WINDOW_FRAMES:-1000}"
 PHASE_BINS="${PHASE_BINS:-120}"
 SOUND_FRAME_STRIDE="${SOUND_FRAME_STRIDE:-1}"
@@ -84,7 +109,7 @@ HEAT_CAPACITY_FRAME_FRACTION_START="${HEAT_CAPACITY_FRAME_FRACTION_START:-0.0}"
 HEAT_CAPACITY_FRAME_FRACTION_END="${HEAT_CAPACITY_FRAME_FRACTION_END:-1.0}"
 HEAT_CAPACITY_DETREND="${HEAT_CAPACITY_DETREND:-1}"
 HEAT_CAPACITY_BLOCK_SIZES="${HEAT_CAPACITY_BLOCK_SIZES:-250 500 1000 2500 5000}"
-Q_ZERO_MODE="${Q_ZERO_MODE:-none}"
+Q_ZERO_MODE="${Q_ZERO_MODE:-initial}"
 LOW_Q_CORRECTION_MODE="${LOW_Q_CORRECTION_MODE:-none}"
 LOW_Q_CORRECTION_MAX_Q="${LOW_Q_CORRECTION_MAX_Q:-0.0}"
 LOW_Q_CORRECTION_BLEND="${LOW_Q_CORRECTION_BLEND:-1.0}"
@@ -166,6 +191,16 @@ if [[ "${HEAT_CAPACITY_DETREND}" == "0" || "${HEAT_CAPACITY_DETREND}" == "false"
     HEAT_CAPACITY_DETREND_FLAG="--no-detrend"
 fi
 
+VACF_REMOVE_FRAME_COM_FLAG="--remove-frame-com"
+if [[ "${VACF_REMOVE_FRAME_COM}" == "0" || "${VACF_REMOVE_FRAME_COM}" == "false" ]]; then
+    VACF_REMOVE_FRAME_COM_FLAG="--no-remove-frame-com"
+fi
+
+RDF_R_MAX_ARGS=()
+if [[ -n "${RDF_R_MAX}" ]]; then
+    RDF_R_MAX_ARGS=(--r-max "${RDF_R_MAX}")
+fi
+
 mkdir -p "${OUTPUT_ROOT}"
 
 echo "MODEL_PATH=${MODEL_PATH}"
@@ -207,6 +242,10 @@ echo "TEMPERATURE_ETA_ADAPTIVE_DEADBAND=${TEMPERATURE_ETA_ADAPTIVE_DEADBAND}"
 echo "POWER_BIAS_CORRECTION_MODE=${POWER_BIAS_CORRECTION_MODE}"
 echo "POWER_BIAS_CORRECTION_ALPHA=${POWER_BIAS_CORRECTION_ALPHA}"
 echo "POWER_BIAS_CORRECTION_EPSILON=${POWER_BIAS_CORRECTION_EPSILON}"
+echo "DISPLACEMENT_BINS=${DISPLACEMENT_BINS}"
+echo "DISPLACEMENT_PERCENTILE=${DISPLACEMENT_PERCENTILE}"
+echo "DISPLACEMENT_CHUNK_FRAMES=${DISPLACEMENT_CHUNK_FRAMES}"
+echo "DISPLACEMENT_SAMPLE_FRAME_STRIDE=${DISPLACEMENT_SAMPLE_FRAME_STRIDE}"
 echo "PHASE_WINDOW_FRAMES=${PHASE_WINDOW_FRAMES}"
 echo "PHASE_BINS=${PHASE_BINS}"
 echo "SOUND_FRAME_STRIDE=${SOUND_FRAME_STRIDE}"
@@ -224,6 +263,14 @@ echo "HEAT_CAPACITY_FRAME_FRACTION_START=${HEAT_CAPACITY_FRAME_FRACTION_START}"
 echo "HEAT_CAPACITY_FRAME_FRACTION_END=${HEAT_CAPACITY_FRAME_FRACTION_END}"
 echo "HEAT_CAPACITY_DETREND=${HEAT_CAPACITY_DETREND}"
 echo "HEAT_CAPACITY_BLOCK_SIZES=${HEAT_CAPACITY_BLOCK_SIZES}"
+echo "VACF_MAX_LAG_FRAMES=${VACF_MAX_LAG_FRAMES}"
+echo "VACF_FFT_CHUNK_SIZE=${VACF_FFT_CHUNK_SIZE}"
+echo "VACF_REMOVE_FRAME_COM=${VACF_REMOVE_FRAME_COM}"
+echo "RDF_BINS=${RDF_BINS}"
+echo "RDF_MAX_FRAMES=${RDF_MAX_FRAMES}"
+echo "RDF_R_MAX=${RDF_R_MAX}"
+echo "RDF_FRAME_FRACTION_START=${RDF_FRAME_FRACTION_START}"
+echo "RDF_FRAME_FRACTION_END=${RDF_FRAME_FRACTION_END}"
 echo "DEVICE=${DEVICE}"
 
 python run_ase_copper_nvt.py \
@@ -350,12 +397,63 @@ python plot_ase_velocity_histograms.py \
     --bins "${VELOCITY_BINS}" \
     --title "ASE NVT velocity histograms: full inference vs available reference"
 
+python plot_displacement_component_layers.py \
+    --ase-path "${ASE_OUTPUT_PATH}" \
+    --data-path "${DATA_PATH}" \
+    --hist-output-path "${DISPLACEMENT_RAW_HIST_PATH}" \
+    --layer-output-path "${DISPLACEMENT_RAW_LAYER_PATH}" \
+    --metrics-path "${DISPLACEMENT_RAW_METRICS_PATH}" \
+    --bins "${DISPLACEMENT_BINS}" \
+    --percentile "${DISPLACEMENT_PERCENTILE}" \
+    --chunk-frames "${DISPLACEMENT_CHUNK_FRAMES}" \
+    --sample-frame-stride "${DISPLACEMENT_SAMPLE_FRAME_STRIDE}" \
+    --title "ASE NVT displacement diagnostics: raw"
+
+python plot_displacement_component_layers.py \
+    --ase-path "${ASE_OUTPUT_PATH}" \
+    --data-path "${DATA_PATH}" \
+    --hist-output-path "${DISPLACEMENT_COMSUB_HIST_PATH}" \
+    --layer-output-path "${DISPLACEMENT_COMSUB_LAYER_PATH}" \
+    --metrics-path "${DISPLACEMENT_COMSUB_METRICS_PATH}" \
+    --bins "${DISPLACEMENT_BINS}" \
+    --percentile "${DISPLACEMENT_PERCENTILE}" \
+    --chunk-frames "${DISPLACEMENT_CHUNK_FRAMES}" \
+    --sample-frame-stride "${DISPLACEMENT_SAMPLE_FRAME_STRIDE}" \
+    --subtract-frame-mean \
+    --title "ASE NVT displacement diagnostics: COM-subtracted"
+
+python plot_ase_vacf.py \
+    --ase-path "${ASE_OUTPUT_PATH}" \
+    --data-path "${DATA_PATH}" \
+    --output-path "${VACF_PLOT_PATH}" \
+    --metrics-path "${VACF_METRICS_PATH}" \
+    --max-lag-frames "${VACF_MAX_LAG_FRAMES}" \
+    --fft-chunk-size "${VACF_FFT_CHUNK_SIZE}" \
+    "${VACF_REMOVE_FRAME_COM_FLAG}" \
+    --title "ASE NVT velocity autocorrelation: inference vs reference"
+
+python plot_ase_rdf.py \
+    --ase-path "${ASE_OUTPUT_PATH}" \
+    --data-path "${DATA_PATH}" \
+    --output-path "${RDF_PLOT_PATH}" \
+    --metrics-path "${RDF_METRICS_PATH}" \
+    --bins "${RDF_BINS}" \
+    --max-frames "${RDF_MAX_FRAMES}" \
+    "${RDF_R_MAX_ARGS[@]}" \
+    --frame-fraction-start "${RDF_FRAME_FRACTION_START}" \
+    --frame-fraction-end "${RDF_FRAME_FRACTION_END}" \
+    --title "ASE NVT radial distribution function: inference vs reference"
+
 python plot_ase_temperature_trace.py \
     --ase-path "${ASE_OUTPUT_PATH}" \
     --output-path "${TEMPERATURE_PLOT_PATH}" \
     --metrics-path "${TEMPERATURE_METRICS_PATH}" \
     --target-temperature-k "${TEMPERATURE_K}" \
     --title "ASE NVT temperature trace"
+
+python plot_ase_com_motion.py \
+    --ase-npz "${ASE_OUTPUT_PATH}" \
+    --output-prefix "${COM_MOTION_PREFIX}"
 
 python plot_ase_phase_histograms.py \
     --ase-path "${ASE_OUTPUT_PATH}" \
@@ -450,8 +548,14 @@ echo "SQW_PLOT_PATH=${SQW_PLOT_PATH}"
 echo "SQW_METRICS_PATH=${SQW_METRICS_PATH}"
 echo "VELOCITY_PLOT_PATH=${VELOCITY_PLOT_PATH}"
 echo "VELOCITY_METRICS_PATH=${VELOCITY_METRICS_PATH}"
+echo "VACF_PLOT_PATH=${VACF_PLOT_PATH}"
+echo "VACF_METRICS_PATH=${VACF_METRICS_PATH}"
+echo "RDF_PLOT_PATH=${RDF_PLOT_PATH}"
+echo "RDF_METRICS_PATH=${RDF_METRICS_PATH}"
 echo "TEMPERATURE_PLOT_PATH=${TEMPERATURE_PLOT_PATH}"
 echo "TEMPERATURE_METRICS_PATH=${TEMPERATURE_METRICS_PATH}"
+echo "COM_MOTION_PLOT_PATH=${COM_MOTION_PLOT_PATH}"
+echo "COM_MOTION_METRICS_PATH=${COM_MOTION_METRICS_PATH}"
 echo "PHASE_PLOT_PATH=${PHASE_PLOT_PATH}"
 echo "PHASE_METRICS_PATH=${PHASE_METRICS_PATH}"
 echo "CANONICAL_PLOT_PATH=${CANONICAL_PLOT_PATH}"

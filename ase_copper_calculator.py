@@ -375,6 +375,9 @@ class CopperFieldRNNCalculator(Calculator):
         self._update_history(current_displacements)
 
         acceleration = self._predict_acceleration()
+        model_energy = None
+        if isinstance(acceleration, tuple):
+            acceleration, model_energy = acceleration
         acceleration = self._apply_curl_correction(acceleration)
         acceleration = self._apply_history_damping(acceleration)
         acceleration = self._apply_low_q_correction(acceleration)
@@ -383,7 +386,7 @@ class CopperFieldRNNCalculator(Calculator):
         flat_acceleration = self._crystal_to_flat_displacements(acceleration)
         forces = self._acceleration_to_forces(flat_acceleration, atoms)
 
-        self.results["energy"] = self._predict_potential_energy_ev(atoms)
+        self.results["energy"] = self._predict_potential_energy_ev(atoms, model_energy=model_energy)
         self.results["forces"] = forces.astype(np.float64)
 
     @staticmethod
@@ -415,6 +418,13 @@ class CopperFieldRNNCalculator(Calculator):
                 device=self.device,
             )
         if self.model_backend in {"pair-force", "pair-energy"}:
+            if self.model_backend == "pair-energy" and hasattr(self.model, "predict_full_accelerations_and_energy"):
+                return self.model.predict_full_accelerations_and_energy(
+                    self._history,
+                    periodic=self.periodic,
+                    patch_batch_size=self.patch_batch_size,
+                    pair_scatter=True,
+                )
             return self.model.predict_full_accelerations(
                 self._history,
                 periodic=self.periodic,
@@ -423,15 +433,8 @@ class CopperFieldRNNCalculator(Calculator):
             )
         return self._predict_edge_acceleration()
 
-    def _predict_potential_energy_ev(self, atoms):
-        """Return model potential energy in eV when the backend exposes one."""
-        if self.model_backend != "pair-energy" or not hasattr(self.model, "predict_full_potential_energy"):
-            return 0.0
-        model_energy = self.model.predict_full_potential_energy(
-            self._history,
-            periodic=self.periodic,
-            patch_batch_size=self.patch_batch_size,
-        )
+    def _model_energy_to_ev(self, model_energy, atoms):
+        """Convert a model-unit pair potential to eV."""
         if self.use_atoms_masses:
             masses = np.asarray(atoms.get_masses(), dtype=np.float64)
             mass_amu = float(np.mean(masses))
@@ -439,6 +442,18 @@ class CopperFieldRNNCalculator(Calculator):
             mass_amu = CU_MASS_AMU
         conversion = mass_amu * AMU_ANGSTROM_PER_PS2_TO_EV_PER_ANGSTROM / (self.dt_ps**2)
         return float(model_energy * conversion)
+
+    def _predict_potential_energy_ev(self, atoms, model_energy=None):
+        """Return model potential energy in eV when the backend exposes one."""
+        if self.model_backend != "pair-energy" or not hasattr(self.model, "predict_full_potential_energy"):
+            return 0.0
+        if model_energy is None:
+            model_energy = self.model.predict_full_potential_energy(
+                self._history,
+                periodic=self.periodic,
+                patch_batch_size=self.patch_batch_size,
+            )
+        return self._model_energy_to_ev(model_energy, atoms)
 
     def _apply_history_damping(self, acceleration):
         """Remove the positive local velocity-response part from acceleration."""

@@ -100,6 +100,7 @@ if [[ "${MODE}" == "worker" ]]; then
     echo "TRAINING_TARGET=${TRAINING_TARGET:-displacement}"
     echo "RNN_READOUT_MODE=${RNN_READOUT_MODE:-last-output}"
     echo "TEMPORAL_ARCHITECTURE=${TEMPORAL_ARCHITECTURE:-stacked}"
+    echo "TEMPORAL_INPUT_MODE=${TEMPORAL_INPUT_MODE:-absolute-pair}"
     echo "DISPLACEMENT_MOMENT_LOSS_WEIGHT=${DISPLACEMENT_MOMENT_LOSS_WEIGHT:-0.0}"
     echo "DISPLACEMENT_MOMENT_MEAN_WEIGHT=${DISPLACEMENT_MOMENT_MEAN_WEIGHT:-1.0}"
     echo "DISPLACEMENT_MOMENT_STD_WEIGHT=${DISPLACEMENT_MOMENT_STD_WEIGHT:-1.0}"
@@ -150,6 +151,7 @@ if [[ "${MODE}" == "worker" ]]; then
         --rnn-layers "${RNN_LAYERS:-1}" \
         --rnn-readout-mode "${RNN_READOUT_MODE:-last-output}" \
         --temporal-architecture "${TEMPORAL_ARCHITECTURE:-stacked}" \
+        --temporal-input-mode "${TEMPORAL_INPUT_MODE:-absolute-pair}" \
         --architecture "${ARCHITECTURE:-edge}" \
         --neighbor-shells "${NEIGHBOR_SHELLS:-2}" \
         --cutoff-scale "${CUTOFF_SCALE:-1.05}" \

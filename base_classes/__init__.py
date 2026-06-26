@@ -1,7 +1,7 @@
 from .datasets import RNNCustomDataset, RNNAutoEncoderCustomDataset
 from .models import FrameLayerRNNNet, RNNAutoEncoder, RNNNet
 from .physics import get_sqw, get_vel, magnitude_spectrum, processing_jl
-from .crystal_predictor import DEFAULT_FLATTEN_ORDER, CrystalRNNNet, CrystalRNNNetBagging
+from .crystal_predictor import DEFAULT_FLATTEN_ORDER, CrystalFlatEnergyRNNNet, CrystalRNNNet, CrystalRNNNetBagging
 from .conv_crystal_predictor import CrystalConvRNNNet
 from .field_rnn_predictor import CrystalFieldRNNNet
 from .edge_rnn_predictor import (
@@ -30,6 +30,7 @@ from .crystal_data import (
 
 __all__ = [
     "build_crystal_atom_order",
+    "CrystalFlatEnergyRNNNet",
     "CrystalRNNNet",
     "CrystalRNNNetBagging",
     "CrystalConvRNNNet",

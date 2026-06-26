@@ -82,8 +82,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--heat-capacity-block-sizes", type=int, nargs="*", default=[250, 500, 1000, 2500, 5000])
     parser.add_argument(
         "--q-zero-mode",
-        choices=["none", "initial", "constant_velocity", "zero"],
-        default="none",
+        choices=[
+            "none",
+            "initial",
+            "zero",
+            "constant_velocity",
+            "initial-every-step",
+            "zero-every-step",
+            "constant-velocity-every-step",
+        ],
+        default="initial",
         help="Spatial q=0 correction mode passed to run_ase_copper_nvt.py.",
     )
     parser.add_argument(

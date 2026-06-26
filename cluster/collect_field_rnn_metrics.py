@@ -45,11 +45,16 @@ def write_rows(rows, output_path):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows = sorted(rows, key=row_score)
-    fields = ["metrics_file", *[field for field in rows[0].keys() if field != "metrics_file"]]
+    fields = []
+    for row in rows:
+        for field in row:
+            if field not in fields:
+                fields.append(field)
+    fields = ["metrics_file", *[field for field in fields if field != "metrics_file"]]
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({field: row.get(field, "") for field in fields} for row in rows)
     return rows
 
 
@@ -71,11 +76,23 @@ def main():
                 if acceleration_ratio
                 else ""
             )
+            scale_text = ""
+            if row.get("velocity_pred_rms") and row.get("velocity_ref_rms"):
+                scale_text += (
+                    f"vel_model={float(row['velocity_pred_rms']):.6g}\t"
+                    f"vel_ref={float(row['velocity_ref_rms']):.6g}\t"
+                )
+            if row.get("acceleration_pred_rms") and row.get("acceleration_ref_rms"):
+                scale_text += (
+                    f"acc_model={float(row['acceleration_pred_rms']):.6g}\t"
+                    f"acc_ref={float(row['acceleration_ref_rms']):.6g}\t"
+                )
             print(
                 f"selection={row_score(row):.6g}\t"
                 f"sqw={float(row['sqw_norm']):.6g}\t"
                 f"velocity={float(velocity_score):.6g}\t"
                 f"{acceleration_text}"
+                f"{scale_text}"
                 f"{row['model_path']}"
             )
         else:

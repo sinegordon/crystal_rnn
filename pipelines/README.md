@@ -45,7 +45,7 @@ The clean ASE inference preset is:
 - `T = 300 K`;
 - `dt = 0.002 ps`;
 - Bussi thermostat coupling `taut = 200 fs`;
-- `q_zero_mode = none`;
+- `q_zero_mode = initial`, meaning initial COM-velocity removal only;
 - no history damping, adaptive eta, curl correction, or power-bias correction.
 
 See [pair_energy/README.md](pair_energy/README.md) for the full command set.

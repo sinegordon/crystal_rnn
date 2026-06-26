@@ -89,8 +89,9 @@ python pipelines/pair_energy/cluster/check_search.py \
 ## Run ASE Inference
 
 The clean validation preset uses Bussi NVT, `T = 300 K`, `dt = 0.002 ps`,
-`taut = 200 fs`, `q_zero_mode = none`, and no internal history/adaptive/power
-correctors.
+`taut = 200 fs`, `q_zero_mode = initial`, and no internal history/adaptive/power
+correctors.  In this default mode only the initial history and COM velocity are
+projected; no q=0 projection is applied during subsequent MD steps.
 
 ```bash
 python pipelines/pair_energy/cluster/submit_inference_1055.py \
@@ -100,7 +101,7 @@ python pipelines/pair_energy/cluster/submit_inference_1055.py \
   --state-path logs/ase1055_pair_energy_best_50000_bussi200_nointernal_state.json \
   --steps 50000 \
   --taut-fs 200 \
-  --q-zero-mode none \
+  --q-zero-mode initial \
   --history-damping-mode none \
   --temperature-eta-adaptive-mode none \
   --power-bias-correction-mode none

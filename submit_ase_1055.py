@@ -28,7 +28,7 @@ DEFAULT_PAIR_ENERGY_MODEL_PATH = (
     "pmean0.1_aover0.1_aunder0.01_op2_up2.pth"
 )
 DEFAULT_DATA_PATH = "data1055.npz"
-DEFAULT_PAIR_ENERGY_LABEL = "pair_energy_finalhidden_sqw0666_bussi200_qnone_nointernal_10000"
+DEFAULT_PAIR_ENERGY_LABEL = "pair_energy_finalhidden_sqw0666_bussi200_qinitial_nointernal_10000"
 DEFAULT_STATE_PATH = LOCAL_ROOT / "logs/ase1055_pair_energy_last_job.json"
 
 
@@ -40,7 +40,7 @@ def preset_defaults(preset: str) -> dict[str, object]:
             "label": DEFAULT_PAIR_ENERGY_LABEL,
             "steps": 10000,
             "taut_fs": 200.0,
-            "q_zero_mode": "none",
+            "q_zero_mode": "initial",
             "history_damping_mode": "none",
             "history_damping_eta": 0.0,
             "history_damping_interval": 10,
@@ -88,7 +88,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--taut-fs", type=float, default=None)
     parser.add_argument("--patch-batch-size", type=int, default=250)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--q-zero-mode", choices=["none", "initial", "constant_velocity", "zero"], default=None)
+    parser.add_argument(
+        "--q-zero-mode",
+        choices=[
+            "none",
+            "initial",
+            "zero",
+            "constant_velocity",
+            "initial-every-step",
+            "zero-every-step",
+            "constant-velocity-every-step",
+        ],
+        default=None,
+    )
     parser.add_argument("--acceleration-scale", type=float, default=None)
     parser.add_argument("--history-damping-mode", choices=["none", "local-positive"], default=None)
     parser.add_argument("--history-damping-eta", type=float, default=None)

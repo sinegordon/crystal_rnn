@@ -1,0 +1,209 @@
+{"kind":"deck","id":"pr/dtp3rp","name":"Deck"}
+{"kind":"layout","layoutId":"2747cbd6-a768-41c5-863b-7c6993f589d9","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"3a29540a-44c0-4a68-89f9-ccd9adf14783","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/q70r0w","slide":1,"title":"Архитектура pair-energy RNN","textShapes":10}
+{"kind":"textbox","id":"sh/v6psfil0","slide":1,"text":"Архитектура pair-energy RNN","textPreview":"Архитектура pair-energy RNN","textChars":27,"textLines":1,"bbox":[42,52,820,120]}
+{"kind":"textbox","id":"sh/knih4byh","slide":1,"text":"Организация входа, слои сети и выходные величины","textPreview":"Организация входа, слои сети и выходные величины","textChars":48,"textLines":1,"bbox":[42,188,820,44]}
+{"kind":"textbox","id":"sh/d8bat47y","slide":1,"text":"Архитектура описывает атомное окружение через пары центр–сосед, обрабатывает историю кадров рекуррентным блоком и вычисляет силы как производные скалярной энергии.","textPreview":"Архитектура описывает атомное окружение через пары центр–сосед, обрабатывает историю кадров рекуррентным блоком и вычисляет силы как прои...","textChars":163,"textLines":1,"bbox":[42,260,735,110]}
+{"kind":"shape","id":"sh/29gr2p8n","slide":1,"bbox":[846,0,392,720]}
+{"kind":"shape","id":"sh/vu9knih4","slide":1,"bbox":[792,124,280,104]}
+{"kind":"textbox","id":"sh/kf6dcbul","slide":1,"text":"история\nсмещений атомов","textPreview":"история | смещений атомов","textChars":23,"textLines":2,"bbox":[806,136,252,80]}
+{"kind":"textbox","id":"sh/d0z61032","slide":1,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[902,242,56,40]}
+{"kind":"shape","id":"sh/2x4nap4r","slide":1,"bbox":[792,314,280,104]}
+{"kind":"textbox","id":"sh/vixczed8","slide":1,"text":"тензор\nпарных признаков","textPreview":"тензор | парных признаков","textChars":23,"textLines":2,"bbox":[806,326,252,80]}
+{"kind":"textbox","id":"sh/vmtwra5g","slide":1,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[902,432,56,40]}
+{"kind":"shape","id":"sh/61032lsz","slide":1,"bbox":[792,504,280,104]}
+{"kind":"textbox","id":"sh/dsji5sne","slide":1,"text":"энергия и\nускорения","textPreview":"энергия и | ускорения","textChars":19,"textLines":2,"bbox":[806,516,252,80]}
+{"kind":"textbox","id":"sh/o7qpg3ex","slide":1,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/vy90je9c","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"notes","id":"nt/q70r0w","slide":1,"text":""}
+{"kind":"slide","id":"sl/wh38ve","slide":2,"title":"INPUT","textShapes":15}
+{"kind":"textbox","id":"sh/tsvu9kni","slide":2,"text":"INPUT","textPreview":"INPUT","textChars":5,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/m1cfa9w3","slide":2,"text":"Входные данные: история смещений","textPreview":"Входные данные: история смещений","textChars":32,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/bm58z25k","slide":2,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/4vmtwra5","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"textbox","id":"sh/tgfmlkjm","slide":2,"text":"Для каждого атома известны равновесное положение R⁰ и смещения u(t) в нескольких последовательных кадрах.","textPreview":"Для каждого атома известны равновесное положение R⁰ и смещения u(t) в нескольких последовательных кадрах.","textChars":105,"textLines":1,"bbox":[42,154,940,56]}
+{"kind":"shape","id":"sh/mp0bi9s3","slide":2,"bbox":[70,272,190,110]}
+{"kind":"textbox","id":"sh/bat47y1k","slide":2,"text":"frame t−2\nu(t−2)","textPreview":"frame t−2 | u(t−2)","textChars":16,"textLines":2,"bbox":[84,284,162,86]}
+{"kind":"textbox","id":"sh/4nap4r65","slide":2,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[280,306,56,40]}
+{"kind":"shape","id":"sh/t83itgfm","slide":2,"bbox":[370,272,190,110]}
+{"kind":"textbox","id":"sh/9gr2p8nq","slide":2,"text":"frame t−1\nu(t−1)","textPreview":"frame t−1 | u(t−1)","textChars":16,"textLines":2,"bbox":[384,284,162,86]}
+{"kind":"textbox","id":"sh/gvy90je9","slide":2,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[580,306,56,40]}
+{"kind":"shape","id":"sh/ra5gbq1o","slide":2,"bbox":[670,272,190,110]}
+{"kind":"textbox","id":"sh/2p8nqxs7","slide":2,"text":"frame t\nu(t)","textPreview":"frame t | u(t)","textChars":12,"textLines":2,"bbox":[684,284,162,86]}
+{"kind":"textbox","id":"sh/94fu18jq","slide":2,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[880,306,56,40]}
+{"kind":"shape","id":"sh/kjm1cfa9","slide":2,"bbox":[970,272,190,110]}
+{"kind":"textbox","id":"sh/r2p8nqxs","slide":2,"text":"расчет\nпри t","textPreview":"расчет | при t","textChars":12,"textLines":2,"bbox":[984,284,162,86]}
+{"kind":"shape","id":"sh/2hwfyxob","slide":2,"bbox":[76,478,1015,96]}
+{"kind":"textbox","id":"sh/9w3m94fu","slide":2,"text":"Тензор до построения пар","textPreview":"Тензор до построения пар","textChars":24,"textLines":1,"bbox":[104,500,430,30]}
+{"kind":"textbox","id":"sh/kb6xkf6d","slide":2,"text":"shape: batch × history_length × atoms × 3","textPreview":"shape: batch × history_length × atoms × 3","textChars":41,"textLines":1,"bbox":[104,538,620,30]}
+{"kind":"textbox","id":"sh/0z61032l","slide":2,"text":"в последних расчетах history_length = 3","textPreview":"в последних расчетах history_length = 3","textChars":39,"textLines":1,"bbox":[680,538,380,30]}
+{"kind":"notes","id":"nt/wh38ve","slide":2,"text":""}
+{"kind":"slide","id":"sl/vgafmu","slide":3,"title":"PAIR FEATURES","textShapes":16}
+{"kind":"textbox","id":"sh/4zidonyd","slide":3,"text":"PAIR FEATURES","textPreview":"PAIR FEATURES","textChars":13,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/fepkzupw","slide":3,"text":"Переход от атомов к парам","textPreview":"Переход от атомов к парам","textChars":25,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/mtwra5gb","slide":3,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/xc3ylc7u","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"textbox","id":"sh/4r65wjud","slide":3,"text":"Для каждого центрального атома выбирается фиксированный список соседей. На каждой паре строится вектор признаков.","textPreview":"Для каждого центрального атома выбирается фиксированный список соседей. На каждой паре строится вектор признаков.","textChars":113,"textLines":1,"bbox":[42,154,1000,56]}
+{"kind":"shape","id":"sh/f6dcbulw","slide":3,"bbox":[74,260,180,96]}
+{"kind":"textbox","id":"sh/mlkjm1cf","slide":3,"text":"центральный\nатом i","textPreview":"центральный | атом i","textChars":18,"textLines":2,"bbox":[88,272,152,72]}
+{"kind":"textbox","id":"sh/x0nuxc3y","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[268,288,56,40]}
+{"kind":"shape","id":"sh/4fu18jqh","slide":3,"bbox":[344,260,210,96]}
+{"kind":"textbox","id":"sh/6dcbulwv","slide":3,"text":"сосед j\nиз списка","textPreview":"сосед j | из списка","textChars":17,"textLines":2,"bbox":[358,272,182,72]}
+{"kind":"textbox","id":"sh/vy90je9c","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[568,288,56,40]}
+{"kind":"shape","id":"sh/oj2t83it","slide":3,"bbox":[644,260,210,96]}
+{"kind":"textbox","id":"sh/d4vmtwra","slide":3,"text":"парный вектор\nxᵢⱼ(t)","textPreview":"парный вектор | xᵢⱼ(t)","textChars":20,"textLines":2,"bbox":[658,272,182,72]}
+{"kind":"textbox","id":"sh/61032lsz","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[868,288,56,40]}
+{"kind":"shape","id":"sh/vmtwra5g","slide":3,"bbox":[944,260,210,96]}
+{"kind":"textbox","id":"sh/o7qpg3ex","slide":3,"text":"все пары\nдля всех атомов","textPreview":"все пары | для всех атомов","textChars":24,"textLines":2,"bbox":[958,272,182,72]}
+{"kind":"shape","id":"sh/dsji5sne","slide":3,"bbox":[94,444,1020,130]}
+{"kind":"textbox","id":"sh/6tovahoz","slide":3,"text":"Для каждого кадра истории","textPreview":"Для каждого кадра истории","textChars":25,"textLines":1,"bbox":[124,468,360,30]}
+{"kind":"textbox","id":"sh/vahoza1g","slide":3,"text":"r⁰ᵢⱼ = R⁰ⱼ − R⁰ᵢ","textPreview":"r⁰ᵢⱼ = R⁰ⱼ − R⁰ᵢ","textChars":16,"textLines":1,"bbox":[124,514,300,34]}
+{"kind":"textbox","id":"sh/r65wjudg","slide":3,"text":"δuᵢⱼ(t) = uⱼ(t) − uᵢ(t)","textPreview":"δuᵢⱼ(t) = uⱼ(t) − uᵢ(t)","textChars":23,"textLines":1,"bbox":[472,514,360,34]}
+{"kind":"textbox","id":"sh/ylc7u54z","slide":3,"text":"xᵢⱼ(t) = [r⁰ᵢⱼ, δuᵢⱼ(t)]","textPreview":"xᵢⱼ(t) = [r⁰ᵢⱼ, δuᵢⱼ(t)]","textChars":24,"textLines":1,"bbox":[846,514,250,34]}
+{"kind":"notes","id":"nt/vgafmu","slide":3,"text":""}
+{"kind":"slide","id":"sl/16tuxh","slide":4,"title":"NETWORK INPUT","textShapes":16}
+{"kind":"textbox","id":"sh/itgfmlkj","slide":4,"text":"NETWORK INPUT","textPreview":"NETWORK INPUT","textChars":13,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/pkzupwb2","slide":4,"text":"Тензор входа сети","textPreview":"Тензор входа сети","textChars":17,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/0z61032l","slide":4,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/72x4nap4","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"textbox","id":"sh/ih4byhgn","slide":4,"text":"После построения пар вход имеет явную ось времени, ось атомов, ось соседей и шесть признаков пары.","textPreview":"После построения пар вход имеет явную ось времени, ось атомов, ось соседей и шесть признаков пары.","textChars":98,"textLines":1,"bbox":[42,154,1000,56]}
+{"kind":"shape","id":"sh/p8nqxs72","slide":4,"bbox":[70,244,1040,120]}
+{"kind":"textbox","id":"sh/0nuxc3yl","slide":4,"text":"X","textPreview":"X","textChars":1,"textLines":1,"bbox":[102,278,42,46]}
+{"kind":"textbox","id":"sh/7y1kre1w","slide":4,"text":"batch × history_length × atoms × neighbors × 6","textPreview":"batch × history_length × atoms × neighbors × 6","textChars":46,"textLines":1,"bbox":[170,284,780,40]}
+{"kind":"textbox","id":"sh/ed8v6psf","slide":4,"text":"6 = 3 components of reference pair vector + 3 components of relative displacement","textPreview":"6 = 3 components of reference pair vector + 3 components of relative displacement","textChars":81,"textLines":1,"bbox":[170,330,760,26]}
+{"kind":"shape","id":"sh/8v6psfil","slide":4,"bbox":[96,450,250,110]}
+{"kind":"textbox","id":"sh/xczed8v6","slide":4,"text":"Равновесная часть","textPreview":"Равновесная часть","textChars":17,"textLines":1,"bbox":[124,474,190,30]}
+{"kind":"textbox","id":"sh/qpg3ex0n","slide":4,"text":"r⁰ᵢⱼ","textPreview":"r⁰ᵢⱼ","textChars":4,"textLines":1,"bbox":[124,516,190,30]}
+{"kind":"textbox","id":"sh/fa9w3m94","slide":4,"text":"+","textPreview":"+","textChars":1,"textLines":1,"bbox":[378,488,60,54]}
+{"kind":"shape","id":"sh/8jqh0fep","slide":4,"bbox":[470,450,270,110]}
+{"kind":"textbox","id":"sh/x4nap4r6","slide":4,"text":"Динамическая часть","textPreview":"Динамическая часть","textChars":18,"textLines":1,"bbox":[498,474,214,30]}
+{"kind":"textbox","id":"sh/qd4vmtwr","slide":4,"text":"δuᵢⱼ(t)","textPreview":"δuᵢⱼ(t)","textChars":7,"textLines":1,"bbox":[498,516,214,30]}
+{"kind":"textbox","id":"sh/fyxobm58","slide":4,"text":"=","textPreview":"=","textChars":1,"textLines":1,"bbox":[776,488,60,54]}
+{"kind":"shape","id":"sh/87ed8bat","slide":4,"bbox":[866,450,250,110]}
+{"kind":"textbox","id":"sh/xs72x4na","slide":4,"text":"Парный признак","textPreview":"Парный признак","textChars":14,"textLines":1,"bbox":[894,474,194,30]}
+{"kind":"textbox","id":"sh/lwval87e","slide":4,"text":"xᵢⱼ(t)","textPreview":"xᵢⱼ(t)","textChars":6,"textLines":1,"bbox":[894,516,194,30]}
+{"kind":"notes","id":"nt/16tuxh","slide":4,"text":""}
+{"kind":"slide","id":"sl/6r1ydj","slide":5,"title":"FRAME-LAYERED RNN","textShapes":18}
+{"kind":"textbox","id":"sh/qpg3ex0n","slide":5,"text":"FRAME-LAYERED RNN","textPreview":"FRAME-LAYERED RNN","textChars":17,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/xczed8v6","slide":5,"text":"Рекуррентный блок","textPreview":"Рекуррентный блок","textChars":17,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/8v6psfil","slide":5,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/fyxobm58","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"textbox","id":"sh/qd4vmtwr","slide":5,"text":"В режиме frame-layered каждый кадр истории подается на свой рекуррентный слой. Число слоев равно длине истории.","textPreview":"В режиме frame-layered каждый кадр истории подается на свой рекуррентный слой. Число слоев равно длине истории.","textChars":111,"textLines":1,"bbox":[42,154,1030,56]}
+{"kind":"shape","id":"sh/x4nap4r6","slide":5,"bbox":[70,260,170,92]}
+{"kind":"textbox","id":"sh/8jqh0fep","slide":5,"text":"xᵢⱼ(t−2)","textPreview":"xᵢⱼ(t−2)","textChars":8,"textLines":1,"bbox":[84,272,142,68]}
+{"kind":"textbox","id":"sh/fmlkjm1c","slide":5,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[254,282,56,40]}
+{"kind":"shape","id":"sh/q1orytsv","slide":5,"bbox":[326,260,190,92]}
+{"kind":"textbox","id":"sh/4nap4r65","slide":5,"text":"RNN слой 1","textPreview":"RNN слой 1","textChars":10,"textLines":1,"bbox":[340,272,162,68]}
+{"kind":"textbox","id":"sh/t83itgfm","slide":5,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[530,282,56,40]}
+{"kind":"textbox","id":"sh/mhk3q5o7","slide":5,"text":"h₁","textPreview":"h₁","textChars":2,"textLines":1,"bbox":[510,320,96,34]}
+{"kind":"shape","id":"sh/b2hwfyxo","slide":5,"bbox":[610,260,210,92]}
+{"kind":"textbox","id":"sh/4byhgn29","slide":5,"text":"xᵢⱼ(t−1)\nRNN слой 2","textPreview":"xᵢⱼ(t−1) | RNN слой 2","textChars":19,"textLines":2,"bbox":[624,272,182,68]}
+{"kind":"textbox","id":"sh/twra5gbq","slide":5,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[834,282,56,40]}
+{"kind":"textbox","id":"sh/m58z25kb","slide":5,"text":"h₂","textPreview":"h₂","textChars":2,"textLines":1,"bbox":[814,320,96,34]}
+{"kind":"shape","id":"sh/bq1oryts","slide":5,"bbox":[914,260,210,92]}
+{"kind":"textbox","id":"sh/47y1kre1","slide":5,"text":"xᵢⱼ(t)\nRNN слой 3","textPreview":"xᵢⱼ(t) | RNN слой 3","textChars":17,"textLines":2,"bbox":[928,272,182,68]}
+{"kind":"textbox","id":"sh/tsvu9kni","slide":5,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[1008,386,48,40]}
+{"kind":"shape","id":"sh/xkf6dcbu","slide":5,"bbox":[910,470,150,82]}
+{"kind":"textbox","id":"sh/4zidonyd","slide":5,"text":"h₃","textPreview":"h₃","textChars":2,"textLines":1,"bbox":[924,482,122,58]}
+{"kind":"shape","id":"sh/fepkzupw","slide":5,"bbox":[82,458,610,112]}
+{"kind":"textbox","id":"sh/mtwra5gb","slide":5,"text":"Выход рекуррентного блока","textPreview":"Выход рекуррентного блока","textChars":25,"textLines":1,"bbox":[110,482,360,30]}
+{"kind":"textbox","id":"sh/xc3ylc7u","slide":5,"text":"Последнее скрытое состояние h₃ передается в энергетический MLP для каждой пары.","textPreview":"Последнее скрытое состояние h₃ передается в энергетический MLP для каждой пары.","textChars":79,"textLines":1,"bbox":[110,524,540,30]}
+{"kind":"notes","id":"nt/6r1ydj","slide":5,"text":""}
+{"kind":"slide","id":"sl/ldc6eg","slide":6,"title":"MODEL OUTPUT","textShapes":16}
+{"kind":"textbox","id":"sh/pg3ex0nu","slide":6,"text":"MODEL OUTPUT","textPreview":"MODEL OUTPUT","textChars":12,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/epkzupwb","slide":6,"text":"Выход сети: энергия и ускорения","textPreview":"Выход сети: энергия и ускорения","textChars":31,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/7adsji5s","slide":6,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/w7mp0bi9","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"shape","id":"sh/psfil0rq","slide":6,"bbox":[64,238,190,104]}
+{"kind":"textbox","id":"sh/e1w7mp0b","slide":6,"text":"скрытое\nсостояние h₃","textPreview":"скрытое | состояние h₃","textChars":20,"textLines":2,"bbox":[78,250,162,80]}
+{"kind":"textbox","id":"sh/7mp0bi9s","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[270,270,56,40]}
+{"kind":"shape","id":"sh/wfyxobm5","slide":6,"bbox":[360,238,190,104]}
+{"kind":"textbox","id":"sh/l0rqd4vm","slide":6,"text":"энергетический\nMLP","textPreview":"энергетический | MLP","textChars":18,"textLines":2,"bbox":[374,250,162,80]}
+{"kind":"textbox","id":"sh/hk3q5o7q","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[566,270,56,40]}
+{"kind":"shape","id":"sh/oza1gvy9","slide":6,"bbox":[656,238,170,104]}
+{"kind":"textbox","id":"sh/zed8v6ps","slide":6,"text":"scalar\nEᵢⱼ","textPreview":"scalar | Eᵢⱼ","textChars":10,"textLines":2,"bbox":[670,250,142,80]}
+{"kind":"textbox","id":"sh/6xkf6dcb","slide":6,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[842,270,56,40]}
+{"kind":"textbox","id":"sh/hwfyxobm","slide":6,"text":"sum","textPreview":"sum","textChars":3,"textLines":1,"bbox":[822,308,96,34]}
+{"kind":"shape","id":"sh/obm58z25","slide":6,"bbox":[930,238,170,104]}
+{"kind":"textbox","id":"sh/zqtcj6to","slide":6,"text":"E_total","textPreview":"E_total","textChars":7,"textLines":1,"bbox":[944,250,142,80]}
+{"kind":"shape","id":"sh/65wjudg7","slide":6,"bbox":[80,438,460,118]}
+{"kind":"textbox","id":"sh/h0fepkzu","slide":6,"text":"Силы и ускорения","textPreview":"Силы и ускорения","textChars":16,"textLines":1,"bbox":[110,462,360,30]}
+{"kind":"textbox","id":"sh/sfil0rqd","slide":6,"text":"Fᵢ = −∂E_total / ∂uᵢ,    aᵢ = Fᵢ / m_Cu","textPreview":"Fᵢ = −∂E_total / ∂uᵢ,    aᵢ = Fᵢ / m_Cu","textChars":39,"textLines":1,"bbox":[110,510,390,34]}
+{"kind":"shape","id":"sh/onyd0z61","slide":6,"bbox":[632,438,470,118]}
+{"kind":"textbox","id":"sh/d8v6psfi","slide":6,"text":"Выходные величины","textPreview":"Выходные величины","textChars":17,"textLines":1,"bbox":[662,462,320,30]}
+{"kind":"textbox","id":"sh/6hcrmhk3","slide":6,"text":"ускорения всех атомов; полная энергия для ASE-диагностики","textPreview":"ускорения всех атомов; полная энергия для ASE-диагностики","textChars":57,"textLines":1,"bbox":[662,510,390,34]}
+{"kind":"notes","id":"nt/ldc6eg","slide":6,"text":""}
+{"kind":"slide","id":"sl/ecqwg5","slide":7,"title":"ASE NVT RESULT","textShapes":12}
+{"kind":"textbox","id":"sh/y1kre1w7","slide":7,"text":"ASE NVT RESULT","textPreview":"ASE NVT RESULT","textChars":14,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/9s36hcrm","slide":7,"text":"Большой прогон: 250000 шагов на Cu 10×5×5","textPreview":"Большой прогон: 250000 шагов на Cu 10×5×5","textChars":41,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/g7adsji5","slide":7,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/rytsvu9k","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"shape","id":"sh/yd0z6103","slide":7,"bbox":[56,174,250,150]}
+{"kind":"textbox","id":"sh/90je9cvi","slide":7,"text":"500 ps","textPreview":"500 ps","textChars":6,"textLines":1,"bbox":[78,196,206,62]}
+{"kind":"textbox","id":"sh/gfmlkjm1","slide":7,"text":"длина траектории, dt = 0.002 ps","textPreview":"длина траектории, dt = 0.002 ps","textChars":31,"textLines":1,"bbox":[80,266,202,46]}
+{"kind":"shape","id":"sh/r65wjudg","slide":7,"bbox":[340,174,250,150]}
+{"kind":"textbox","id":"sh/ylc7u54z","slide":7,"text":"301.4 K","textPreview":"301.4 K","textChars":7,"textLines":1,"bbox":[362,196,206,62]}
+{"kind":"textbox","id":"sh/g7adsji5","slide":7,"text":"средняя температура","textPreview":"средняя температура","textChars":19,"textLines":1,"bbox":[364,266,202,46]}
+{"kind":"shape","id":"sh/9s36hcrm","slide":7,"bbox":[624,174,250,150]}
+{"kind":"textbox","id":"sh/y1kre1w7","slide":7,"text":"0.9994","textPreview":"0.9994","textChars":6,"textLines":1,"bbox":[646,196,206,62]}
+{"kind":"textbox","id":"sh/rmhk3q5o","slide":7,"text":"velocity mean ratio","textPreview":"velocity mean ratio","textChars":19,"textLines":1,"bbox":[648,266,202,46]}
+{"kind":"shape","id":"sh/gfmlkjm1","slide":7,"bbox":[908,174,250,150]}
+{"kind":"textbox","id":"sh/90je9cvi","slide":7,"text":"0.9675","textPreview":"0.9675","textChars":6,"textLines":1,"bbox":[930,196,206,62]}
+{"kind":"textbox","id":"sh/yd0z6103","slide":7,"text":"sound-speed ratio","textPreview":"sound-speed ratio","textChars":17,"textLines":1,"bbox":[932,266,202,46]}
+{"kind":"image","id":"im/kre1w7mp","slide":7,"name":"","alt":"Temperature trace for 250k ASE NVT run","bbox":[56,382,530,230]}
+{"kind":"image","id":"im/v6psfil0","slide":7,"name":"","alt":"Velocity histograms for 250k ASE NVT run","bbox":[642,382,530,230]}
+{"kind":"notes","id":"nt/ecqwg5","slide":7,"text":""}
+{"kind":"slide","id":"sl/tn3gs4","slide":8,"title":"S(Q,W), VACF, RDF","textShapes":11}
+{"kind":"textbox","id":"sh/z25kb6xk","slide":8,"text":"S(Q,W), VACF, RDF","textPreview":"S(Q,W), VACF, RDF","textChars":17,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/onyd0z61","slide":8,"text":"Динамические и структурные проверки","textPreview":"Динамические и структурные проверки","textChars":35,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/d8v6psfi","slide":8,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/6tovahoz","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"shape","id":"sh/61032lsz","slide":8,"bbox":[590,430,190,130]}
+{"kind":"textbox","id":"sh/vmtwra5g","slide":8,"text":"0.812","textPreview":"0.812","textChars":5,"textLines":1,"bbox":[612,452,146,62]}
+{"kind":"textbox","id":"sh/b2hwfyxo","slide":8,"text":"S(q,w) correlation","textPreview":"S(q,w) correlation","textChars":18,"textLines":1,"bbox":[614,522,142,26]}
+{"kind":"shape","id":"sh/mhk3q5o7","slide":8,"bbox":[808,430,190,130]}
+{"kind":"textbox","id":"sh/t83itgfm","slide":8,"text":"0.992","textPreview":"0.992","textChars":5,"textLines":1,"bbox":[830,452,146,62]}
+{"kind":"textbox","id":"sh/4nap4r65","slide":8,"text":"VACF correlation","textPreview":"VACF correlation","textChars":16,"textLines":1,"bbox":[832,522,142,26]}
+{"kind":"shape","id":"sh/bq1oryts","slide":8,"bbox":[1026,430,190,130]}
+{"kind":"textbox","id":"sh/m58z25kb","slide":8,"text":"0.999995","textPreview":"0.999995","textChars":8,"textLines":1,"bbox":[1048,452,146,62]}
+{"kind":"textbox","id":"sh/twra5gbq","slide":8,"text":"RDF correlation","textPreview":"RDF correlation","textChars":15,"textLines":1,"bbox":[1050,522,142,26]}
+{"kind":"textbox","id":"sh/4byhgn29","slide":8,"text":"Важно: S(q,w) сравнивается только с доступным reference overlap; длинный ASE-прогон использует все 250001 кадров для ансамблевых статистик.","textPreview":"Важно: S(q,w) сравнивается только с доступным reference overlap; длинный ASE-прогон использует все 250001 кадров для ансамблевых статистик.","textChars":139,"textLines":1,"bbox":[58,594,1030,34]}
+{"kind":"image","id":"im/m1cfa9w3","slide":8,"name":"","alt":"S(q,w) comparison","bbox":[46,150,505,320]}
+{"kind":"image","id":"im/tsvu9kni","slide":8,"name":"","alt":"VACF comparison","bbox":[590,150,290,210]}
+{"kind":"image","id":"im/47y1kre1","slide":8,"name":"","alt":"RDF comparison","bbox":[910,150,290,210]}
+{"kind":"notes","id":"nt/tn3gs4","slide":8,"text":""}
+{"kind":"slide","id":"sl/m0s9vr","slide":9,"title":"THERMODYNAMIC DIAGNOSTICS","textShapes":11}
+{"kind":"textbox","id":"sh/d8v6psfi","slide":9,"text":"THERMODYNAMIC DIAGNOSTICS","textPreview":"THERMODYNAMIC DIAGNOSTICS","textChars":25,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/6hcrmhk3","slide":9,"text":"Энергия: прямой E_tot стабилен на 500 ps","textPreview":"Энергия: прямой E_tot стабилен на 500 ps","textChars":40,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/z25kb6xk","slide":9,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/ovahoza1","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"shape","id":"sh/o7qpg3ex","slide":9,"bbox":[82,478,260,126]}
+{"kind":"textbox","id":"sh/dsji5sne","slide":9,"text":"−5.9e−5","textPreview":"−5.9e−5","textChars":7,"textLines":1,"bbox":[104,500,216,62]}
+{"kind":"textbox","id":"sh/pwb2hwfy","slide":9,"text":"E_tot slope, eV/ps","textPreview":"E_tot slope, eV/ps","textChars":18,"textLines":1,"bbox":[106,570,212,22]}
+{"kind":"shape","id":"sh/0bi9s36h","slide":9,"bbox":[410,478,260,126]}
+{"kind":"textbox","id":"sh/7qpg3ex0","slide":9,"text":"3.124","textPreview":"3.124","textChars":5,"textLines":1,"bbox":[432,500,216,62]}
+{"kind":"textbox","id":"sh/i5sneloj","slide":9,"text":"Cv direct E_tot, kB/atom","textPreview":"Cv direct E_tot, kB/atom","textChars":24,"textLines":1,"bbox":[434,570,212,22]}
+{"kind":"shape","id":"sh/p4r65wju","slide":9,"bbox":[738,478,260,126]}
+{"kind":"textbox","id":"sh/wjudg7ad","slide":9,"text":"3.096","textPreview":"3.096","textChars":5,"textLines":1,"bbox":[760,500,216,62]}
+{"kind":"textbox","id":"sh/7y1kre1w","slide":9,"text":"Cv path-energy, kB/atom","textPreview":"Cv path-energy, kB/atom","textChars":23,"textLines":1,"bbox":[762,570,212,22]}
+{"kind":"textbox","id":"sh/ed8v6psf","slide":9,"text":"Path-energy все еще имеет линейный work-drift, но direct E_tot у energy-модели почти не плывет.","textPreview":"Path-energy все еще имеет линейный work-drift, но direct E_tot у energy-модели почти не плывет.","textChars":95,"textLines":1,"bbox":[80,626,1000,32]}
+{"kind":"image","id":"im/g3ex0nux","slide":9,"name":"","alt":"Direct total energy trace","bbox":[46,150,380,270]}
+{"kind":"image","id":"im/nih4byhg","slide":9,"name":"","alt":"Cumulative direct total energy","bbox":[450,150,380,270]}
+{"kind":"image","id":"im/yxobm58z","slide":9,"name":"","alt":"Direct E_tot heat capacity","bbox":[854,150,380,270]}
+{"kind":"notes","id":"nt/m0s9vr","slide":9,"text":""}
+{"kind":"slide","id":"sl/97yj4u","slide":10,"title":"COM-SUBTRACTION CHECK","textShapes":10}
+{"kind":"textbox","id":"sh/a1gvy90j","slide":10,"text":"COM-SUBTRACTION CHECK","textPreview":"COM-SUBTRACTION CHECK","textChars":21,"textLines":1,"bbox":[42,34,520,24]}
+{"kind":"textbox","id":"sh/hoza1gvy","slide":10,"text":"Расхождение displacement components оказалось q=0 drift","textPreview":"Расхождение displacement components оказалось q=0 drift","textChars":55,"textLines":1,"bbox":[42,64,980,82]}
+{"kind":"textbox","id":"sh/s36hcrmh","slide":10,"text":"Cu pair-energy RNN / 250k ASE NVT","textPreview":"Cu pair-energy RNN / 250k ASE NVT","textChars":33,"textLines":1,"bbox":[42,660,520,24]}
+{"kind":"textbox","id":"sh/za1gvy90","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1178,656,60,28]}
+{"kind":"shape","id":"sh/hgn29gr2","slide":10,"bbox":[715,165,455,126]}
+{"kind":"textbox","id":"sh/svu9knih","slide":10,"text":"Raw displacement","textPreview":"Raw displacement","textChars":16,"textLines":1,"bbox":[742,188,300,28]}
+{"kind":"textbox","id":"sh/3ylc7u54","slide":10,"text":"mean = +0.0248 A\nstd ratio = 1.0845","textPreview":"mean = +0.0248 A | std ratio = 1.0845","textChars":35,"textLines":2,"bbox":[742,230,300,52]}
+{"kind":"shape","id":"sh/adsji5sn","slide":10,"bbox":[715,318,455,150]}
+{"kind":"textbox","id":"sh/w7mp0bi9","slide":10,"text":"After COM subtraction","textPreview":"After COM subtraction","textChars":21,"textLines":1,"bbox":[742,344,360,28]}
+{"kind":"textbox","id":"sh/psfil0rq","slide":10,"text":"std ≈ 0.081 A for all axes\nTV distance: 0.005–0.018","textPreview":"std ≈ 0.081 A for all axes | TV distance: 0.005–0.018","textChars":51,"textLines":2,"bbox":[742,386,350,60]}
+{"kind":"textbox","id":"sh/e1w7mp0b","slide":10,"text":"Вывод","textPreview":"Вывод","textChars":5,"textLines":1,"bbox":[715,520,230,32]}
+{"kind":"textbox","id":"sh/7mp0bi9s","slide":10,"text":"Локальная динамика выглядит согласованной; raw histogram расходился в основном из-за слабого накопленного центра-масс/нулевой моды.","textPreview":"Локальная динамика выглядит согласованной; raw histogram расходился в основном из-за слабого накопленного центра-масс/нулевой моды.","textChars":131,"textLines":1,"bbox":[715,560,460,68]}
+{"kind":"image","id":"im/zed8v6ps","slide":10,"name":"","alt":"COM-subtracted displacement component histograms","bbox":[56,160,610,360]}
+{"kind":"notes","id":"nt/97yj4u","slide":10,"text":""}

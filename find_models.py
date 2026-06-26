@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 
-from base_classes import CrystalRNNNet, DEFAULT_FLATTEN_ORDER, get_sqw
+from base_classes import CrystalFlatEnergyRNNNet, CrystalRNNNet, DEFAULT_FLATTEN_ORDER, get_sqw
 from base_classes.crystal_predictor import (
     ORDER_AXIS_TO_DIM,
     _build_supercell_origins,
@@ -55,6 +55,15 @@ def parse_args():
         "--models-dir",
         default="models",
         help="Directory where selected models will be saved.",
+    )
+    parser.add_argument(
+        "--architecture",
+        choices=["flat", "flat-energy"],
+        default="flat",
+        help=(
+            "Flat model parameterization. 'flat' predicts the selected target directly; "
+            "'flat-energy' predicts one scalar block energy and differentiates it to central-cell acceleration."
+        ),
     )
     parser.add_argument("--count-steps", type=int, default=COUNT_STEPS)
     parser.add_argument("--count-run", type=int, default=COUNT_RUN)
@@ -535,7 +544,11 @@ def save_model(model, models_dir, norm, rnn_type, data_len, count_steps):
     temporal_architecture = getattr(model, "temporal_architecture", "stacked")
     if temporal_architecture != "stacked":
         target_suffix += f"_temporal{temporal_architecture.replace('-', '')}"
-    filepath = models_path / f"mean_norm_{norm}_{rnn_type.lower()}_crystal{target_suffix}_{int(data_len * count_steps)}.pth"
+    architecture = getattr(model, "architecture", "flat")
+    architecture_tag = "" if architecture == "flat" else f"_{architecture.replace('-', '_')}"
+    filepath = models_path / (
+        f"mean_norm_{norm}_{rnn_type.lower()}_crystal{architecture_tag}{target_suffix}_{int(data_len * count_steps)}.pth"
+    )
     torch.save(model, filepath)
     print(f"==============> SAVE MODEL TO FILE - {filepath}")
 
@@ -558,6 +571,15 @@ def main():
     args.loss_weight_mode = _normalize_loss_weight_mode(args.loss_weight_mode)
     args.center_loss_weight = _normalize_center_loss_weight(args.center_loss_weight)
     args.center_loss_alpha = _normalize_center_loss_alpha(args.center_loss_alpha)
+    if args.architecture == "flat-energy":
+        if args.rollout_steps != 1:
+            raise ValueError("--architecture flat-energy currently supports only --rollout-steps 1")
+        if args.target_mode != "acceleration":
+            print("flat-energy architecture uses central-cell acceleration targets; forcing --target-mode acceleration")
+            args.target_mode = "acceleration"
+        if not args.periodic:
+            print("flat-energy centered rollout needs periodic block coverage; forcing --periodic")
+            args.periodic = True
     data = load_training_data(args.data_path)
     sequence_length = model_sequence_length(data)
     if args.temporal_architecture == "frame-layered" and args.num_layers != sequence_length:
@@ -570,7 +592,8 @@ def main():
 
     for iteration in range(args.count_models):
         print(f"BEGIN ITER = {iteration}")
-        predictor = CrystalRNNNet(
+        predictor_cls = CrystalFlatEnergyRNNNet if args.architecture == "flat-energy" else CrystalRNNNet
+        predictor = predictor_cls(
             hidden_size=args.hidden_size,
             num_layers=args.num_layers,
             type=args.rnn_type.upper(),

@@ -65,13 +65,22 @@ def parse_args():
     )
     parser.add_argument(
         "--q-zero-mode",
-        choices=["none", "initial", "constant_velocity", "zero"],
-        default="none",
+        choices=[
+            "none",
+            "initial",
+            "zero",
+            "constant_velocity",
+            "initial-every-step",
+            "zero-every-step",
+            "constant-velocity-every-step",
+        ],
+        default="initial",
         help=(
-            "Control the spatial q=0 displacement mode after every ASE MD step. "
-            "'initial' keeps the mode at the last initial-history frame; "
-            "'constant_velocity' continues the initial q=0 velocity; "
-            "'zero' removes the q=0 displacement mode."
+            "Control the spatial q=0 displacement mode. "
+            "'initial' corrects only the initial history and COM velocity; "
+            "'zero' removes the initial q=0 displacement and velocity; "
+            "'constant_velocity' preserves the initial q=0 velocity; "
+            "'*-every-step' variants additionally project q=0 after every MD step."
         ),
     )
     parser.add_argument(
@@ -357,20 +366,71 @@ def spatial_q_zero(crystal_values):
 
 def q_zero_target(step, mode, initial_q_zero, initial_q_zero_delta):
     """Return the requested q=0 displacement mode for one ASE step."""
+    mode = normalize_q_zero_mode(mode)
     if mode == "initial":
         return initial_q_zero
-    if mode == "constant_velocity":
+    if mode == "constant-velocity":
         return initial_q_zero + float(step) * initial_q_zero_delta
     if mode == "zero":
         return np.zeros_like(initial_q_zero)
     raise ValueError(f"Unsupported q_zero_mode={mode!r}")
 
 
+def normalize_q_zero_mode(mode):
+    """Normalize q-zero mode aliases used by older command lines."""
+    return str(mode).replace("_", "-")
+
+
+def q_zero_initial_mode(mode):
+    """Return the initial-history q=0 operation for a selected mode."""
+    normalized = normalize_q_zero_mode(mode)
+    if normalized.endswith("-every-step"):
+        normalized = normalized[: -len("-every-step")]
+    if normalized == "constant-velocity":
+        return "constant-velocity"
+    return normalized
+
+
+def q_zero_every_step_mode(mode):
+    """Return the per-step q=0 operation, or 'none' when only initialization is requested."""
+    normalized = normalize_q_zero_mode(mode)
+    if not normalized.endswith("-every-step"):
+        return "none"
+    return normalized[: -len("-every-step")]
+
+
+def apply_initial_q_zero_mode(data, positions_history, mode):
+    """Return initial positions with a consistent spatial q=0 gauge."""
+    mode = q_zero_initial_mode(mode)
+    if mode == "none":
+        return np.asarray(positions_history, dtype=np.float64)
+
+    reference_positions = np.asarray(data["reference_positions"], dtype=np.float64)
+    atom_order = np.asarray(data["atom_order"], dtype=np.int64)
+    history_displacements = []
+    for positions in np.asarray(positions_history, dtype=np.float64):
+        history_displacements.append(flat_to_crystal_values(positions - reference_positions, atom_order))
+    history_displacements = np.asarray(history_displacements, dtype=np.float64)
+
+    latest_q_zero = spatial_q_zero(history_displacements[-1])
+    latest_delta = spatial_q_zero(history_displacements[-1]) - spatial_q_zero(history_displacements[-2])
+    corrected_frames = []
+    latest_index = len(history_displacements) - 1
+    for index, displacements in enumerate(history_displacements):
+        if mode == "constant-velocity":
+            target = latest_q_zero + float(index - latest_index) * latest_delta
+        else:
+            target = q_zero_target(0, mode, latest_q_zero, latest_delta)
+        corrected_displacements = displacements - spatial_q_zero(displacements) + target
+        corrected_frames.append(reference_positions + crystal_to_flat_values(corrected_displacements, atom_order))
+    return np.asarray(corrected_frames, dtype=np.float64)
+
+
 class ASEQZeroController:
     """Apply displacement and velocity q=0 corrections to ASE atoms."""
 
     def __init__(self, data, positions_history, timestep, mode):
-        self.mode = str(mode)
+        self.mode = q_zero_every_step_mode(mode)
         self.reference_positions = np.asarray(data["reference_positions"], dtype=np.float64)
         self.atom_order = np.asarray(data["atom_order"], dtype=np.int64)
         self.timestep = float(timestep)
@@ -384,7 +444,7 @@ class ASEQZeroController:
 
     def _target_velocity_q_zero(self):
         """Return the q=0 velocity target in ASE internal velocity units."""
-        if self.mode == "constant_velocity":
+        if self.mode == "constant-velocity":
             return self.initial_q_zero_delta / self.timestep
         return np.zeros_like(self.initial_q_zero)
 
@@ -562,8 +622,13 @@ def main():
         raise ValueError(f"initial-frames must be in [0, {frame_count})")
 
     cell = cell_from_dataset(data)
-    positions_history, velocities, initial_velocity_scale = initialize_history_and_velocities(
+    positions_history = apply_initial_q_zero_mode(
+        data=data,
         positions_history=frame_positions(data, args.initial_frames),
+        mode=args.q_zero_mode,
+    )
+    positions_history, velocities, initial_velocity_scale = initialize_history_and_velocities(
+        positions_history=positions_history,
         cell=cell,
         dt_ps=args.dt_ps,
         target_temperature_k=args.temperature_k,
@@ -615,6 +680,15 @@ def main():
         power_bias_correction_epsilon=args.power_bias_correction_epsilon,
     )
 
+    timestep = args.dt_ps * 1000.0 * units.fs
+    q_zero_controller = ASEQZeroController(
+        data=data,
+        positions_history=positions_history,
+        timestep=timestep,
+        mode=args.q_zero_mode,
+    )
+    q_zero_controller.apply(atoms, step=0)
+
     write_initial_summary(atoms, args, initial_velocity_scale)
 
     output_npz = Path(args.output_npz)
@@ -626,13 +700,6 @@ def main():
     else:
         trajectory = None
 
-    timestep = args.dt_ps * 1000.0 * units.fs
-    q_zero_controller = ASEQZeroController(
-        data=data,
-        positions_history=positions_history,
-        timestep=timestep,
-        mode=args.q_zero_mode,
-    )
     dynamics = Bussi(
         atoms,
         timestep=timestep,

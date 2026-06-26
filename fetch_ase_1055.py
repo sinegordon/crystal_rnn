@@ -18,13 +18,16 @@ from pipelines.shared.cluster.config import defaults_from_argv
 
 LOCAL_ROOT = Path(__file__).resolve().parent
 DEFAULT_STATE_PATH = LOCAL_ROOT / "logs/ase1055_pair_energy_last_job.json"
-DEFAULT_OUTPUT_ROOT = "inference_outputs/ase_nvt_1055/pair_energy_finalhidden_sqw0666_bussi200_qnone_nointernal_10000"
+DEFAULT_OUTPUT_ROOT = "inference_outputs/ase_nvt_1055/pair_energy_finalhidden_sqw0666_bussi200_qinitial_nointernal_10000"
 
 POSTPROCESS_PATTERNS = ["*.png", "*.txt", "*.tsv", "*.log"]
 PLOTS = [
     "ase_nvt_1055_sqw.png",
     "ase_nvt_1055_temperature_trace.png",
+    "ase_nvt_1055_com_motion.png",
     "ase_nvt_1055_velocity_histograms.png",
+    "ase_nvt_1055_vacf.png",
+    "ase_nvt_1055_rdf.png",
     "ase_nvt_1055_etot_trace.png",
     "ase_nvt_1055_etot_cumulative.png",
     "ase_nvt_1055_canonical_checks.png",

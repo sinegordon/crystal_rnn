@@ -77,7 +77,18 @@ def parse_args():
             "Temporal core for pair-energy models. 'stacked' uses PyTorch "
             "nn.RNN/GRU/LSTM num_layers; 'frame-layered' assigns each history "
             "frame to its own recurrent cell, so rnn-layers must equal the "
-            "data sequence length."
+            "sequence length after temporal input preprocessing."
+        ),
+    )
+    parser.add_argument(
+        "--temporal-input-mode",
+        choices=["absolute-pair", "relative-to-first", "ref-plus-delta"],
+        default="absolute-pair",
+        help=(
+            "How raw history frames are converted before edge/pair features are fed to the RNN. "
+            "'absolute-pair' keeps the existing pair-vector history. 'relative-to-first' expects "
+            "three raw frames and feeds only two recurrent steps: frame1-frame0 and frame2-frame0. "
+            "'ref-plus-delta' feeds [R_ref/a0, (u_neighbor-u_center)/a0] as six channels."
         ),
     )
     parser.add_argument(
@@ -589,11 +600,14 @@ def save_model(model, models_dir, norm, args):
     readout_tag = "" if readout_mode == "last-output" else f"_readout{readout_mode.replace('-', '')}"
     temporal_architecture = getattr(model, "temporal_architecture", getattr(args, "temporal_architecture", "stacked"))
     temporal_tag = "" if temporal_architecture == "stacked" else f"_temporal{temporal_architecture.replace('-', '')}"
+    temporal_input_mode = getattr(model, "temporal_input_mode", getattr(args, "temporal_input_mode", "absolute-pair"))
+    temporal_input_tag = "" if temporal_input_mode == "absolute-pair" else f"_input{temporal_input_mode.replace('-', '')}"
     filename = (
         f"mean_norm_{norm}_{args.rnn_type.lower()}_{architecture_tag}_acceleration"
         f"_h{model.hidden_size}_rl{model.rnn_layers}"
         f"{readout_tag}"
         f"{temporal_tag}"
+        f"{temporal_input_tag}"
         f"{'_bidir' if model.bidirectional else ''}"
         f"_shells{model.neighbor_shells}_n{model.neighbor_count}"
         f"_target{training_target}"
@@ -617,17 +631,30 @@ def write_metrics(path, rows):
         "sqw_norm",
         "selection_score",
         "velocity_score",
+        "velocity_component_score",
+        "velocity_speed_score",
         "acceleration_score",
         "velocity_end_speed_ratio",
+        "velocity_pred_end_speed_mean",
+        "velocity_ref_end_speed_mean",
         "velocity_rms_ratio",
         "velocity_end_rms_ratio",
         "acceleration_rms_ratio",
         "acceleration_end_rms_ratio",
+        "velocity_pred_rms",
+        "velocity_ref_rms",
+        "velocity_pred_end_rms",
+        "velocity_ref_end_rms",
+        "acceleration_pred_rms",
+        "acceleration_ref_rms",
+        "acceleration_pred_end_rms",
+        "acceleration_ref_end_rms",
         "rnn_type",
         "hidden_size",
         "rnn_layers",
         "rnn_readout_mode",
         "temporal_architecture",
+        "temporal_input_mode",
         "architecture",
         "bidirectional",
         "neighbor_shells",
@@ -702,13 +729,19 @@ def main():
     eval_data = data if args.eval_data_path is None else load_training_data(args.eval_data_path)
     validate_training_eval_compatibility(data, eval_data)
     sequence_length = model_sequence_length(data)
+    effective_sequence_length = sequence_length - 1 if args.temporal_input_mode == "relative-to-first" else sequence_length
+    if args.temporal_input_mode == "relative-to-first" and sequence_length != 3:
+        raise ValueError(
+            "--temporal-input-mode relative-to-first expects exactly three raw history frames "
+            f"in the dataset, got {sequence_length}"
+        )
     if args.temporal_architecture == "frame-layered":
         if args.architecture != "pair-energy":
             raise ValueError("--temporal-architecture frame-layered is currently implemented only for pair-energy")
-        if args.rnn_layers != sequence_length:
+        if args.rnn_layers != effective_sequence_length:
             raise ValueError(
                 "--temporal-architecture frame-layered requires --rnn-layers "
-                f"to match the data sequence length ({sequence_length})"
+                f"to match the recurrent input sequence length ({effective_sequence_length})"
             )
     rows = []
 
@@ -738,6 +771,7 @@ def main():
             "cutoff_scale": args.cutoff_scale,
             "acceleration_normalization": args.acceleration_normalization,
             "rnn_readout_mode": args.rnn_readout_mode,
+            "temporal_input_mode": args.temporal_input_mode,
             "device": args.device,
         }
         if args.architecture == "pair-energy":
@@ -747,6 +781,7 @@ def main():
         print("ARCHITECTURE =", args.architecture)
         print("RNN_READOUT_MODE =", model.rnn_readout_mode)
         print("TEMPORAL_ARCHITECTURE =", getattr(model, "temporal_architecture", "stacked"))
+        print("TEMPORAL_INPUT_MODE =", getattr(model, "temporal_input_mode", "absolute-pair"))
         print("NEIGHBOR_COUNT =", model.neighbor_count)
         model.batch_size = args.batch_size
         model.epochs = args.epochs
@@ -828,8 +863,18 @@ def main():
         print("VELOCITY_SCORE =", metrics["velocity_score"])
         print("ACCELERATION_SCORE =", acceleration_score)
         print("VELOCITY_END_SPEED_RATIO =", metrics["velocity_end_speed_ratio"])
+        print("VELOCITY_MODEL_RMS =", metrics["velocity_pred_rms"])
+        print("VELOCITY_REFERENCE_RMS =", metrics["velocity_ref_rms"])
+        print("VELOCITY_MODEL_END_RMS =", metrics["velocity_pred_end_rms"])
+        print("VELOCITY_REFERENCE_END_RMS =", metrics["velocity_ref_end_rms"])
+        print("VELOCITY_MODEL_END_SPEED_MEAN =", metrics["velocity_pred_end_speed_mean"])
+        print("VELOCITY_REFERENCE_END_SPEED_MEAN =", metrics["velocity_ref_end_speed_mean"])
         print("ACCELERATION_RMS_RATIO =", metrics["acceleration_rms_ratio"])
         print("ACCELERATION_END_RMS_RATIO =", metrics["acceleration_end_rms_ratio"])
+        print("ACCELERATION_MODEL_RMS =", metrics["acceleration_pred_rms"])
+        print("ACCELERATION_REFERENCE_RMS =", metrics["acceleration_ref_rms"])
+        print("ACCELERATION_MODEL_END_RMS =", metrics["acceleration_pred_end_rms"])
+        print("ACCELERATION_REFERENCE_END_RMS =", metrics["acceleration_ref_end_rms"])
         print("VELOCITY_RMS_RATIO =", metrics["velocity_rms_ratio"])
         print("VELOCITY_END_RMS_RATIO =", metrics["velocity_end_rms_ratio"])
         print("SELECTION_SCORE =", selection_score)
@@ -861,17 +906,30 @@ def main():
                 "sqw_norm": norm,
                 "selection_score": selection_score,
                 "velocity_score": metrics["velocity_score"],
+                "velocity_component_score": metrics["velocity_component_score"],
+                "velocity_speed_score": metrics["velocity_speed_score"],
                 "acceleration_score": acceleration_score,
                 "velocity_end_speed_ratio": metrics["velocity_end_speed_ratio"],
+                "velocity_pred_end_speed_mean": metrics["velocity_pred_end_speed_mean"],
+                "velocity_ref_end_speed_mean": metrics["velocity_ref_end_speed_mean"],
                 "velocity_rms_ratio": metrics["velocity_rms_ratio"],
                 "velocity_end_rms_ratio": metrics["velocity_end_rms_ratio"],
                 "acceleration_rms_ratio": metrics["acceleration_rms_ratio"],
                 "acceleration_end_rms_ratio": metrics["acceleration_end_rms_ratio"],
+                "velocity_pred_rms": metrics["velocity_pred_rms"],
+                "velocity_ref_rms": metrics["velocity_ref_rms"],
+                "velocity_pred_end_rms": metrics["velocity_pred_end_rms"],
+                "velocity_ref_end_rms": metrics["velocity_ref_end_rms"],
+                "acceleration_pred_rms": metrics["acceleration_pred_rms"],
+                "acceleration_ref_rms": metrics["acceleration_ref_rms"],
+                "acceleration_pred_end_rms": metrics["acceleration_pred_end_rms"],
+                "acceleration_ref_end_rms": metrics["acceleration_ref_end_rms"],
                 "rnn_type": args.rnn_type,
                 "hidden_size": model.hidden_size,
                 "rnn_layers": model.rnn_layers,
                 "rnn_readout_mode": model.rnn_readout_mode,
                 "temporal_architecture": getattr(model, "temporal_architecture", "stacked"),
+                "temporal_input_mode": getattr(model, "temporal_input_mode", "absolute-pair"),
                 "architecture": args.architecture,
                 "bidirectional": bool(model.bidirectional),
                 "neighbor_shells": model.neighbor_shells,

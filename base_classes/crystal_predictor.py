@@ -121,6 +121,12 @@ def _flatten_supercell(block, flatten_order):
     return np.transpose(block, axes=axes).reshape(-1)
 
 
+def _torch_flatten_supercell(block, flatten_order):
+    """Torch equivalent of ``_flatten_supercell`` for differentiable inference."""
+    axes = [ORDER_AXIS_TO_DIM[name] for name in flatten_order]
+    return block.permute(*axes).reshape(-1)
+
+
 def _unflatten_supercell(flat_features, train_supercell_shape, unit_cell_atoms, flatten_order):
     """Restore a flat model output to `(bx, by, bz, unit_cell_atoms, 3)`."""
     ordered_shape = []
@@ -140,6 +146,26 @@ def _unflatten_supercell(flat_features, train_supercell_shape, unit_cell_atoms, 
     ordered = flat_features.reshape(*ordered_shape)
     inverse_axes = np.argsort([ORDER_AXIS_TO_DIM[name] for name in flatten_order])
     return np.transpose(ordered, axes=inverse_axes).reshape(canonical_shape)
+
+
+def _center_feature_layout(train_supercell_shape, unit_cell_atoms, flatten_order):
+    """Return flat feature indices that belong to the central unit cell."""
+    if any(dim % 2 == 0 for dim in train_supercell_shape):
+        raise ValueError("Central-cell flat-energy models require odd train_supercell_shape dimensions")
+
+    center_cell = tuple(dim // 2 for dim in train_supercell_shape)
+    canonical_shape = (*train_supercell_shape, unit_cell_atoms, 3)
+    center_mask = np.zeros(canonical_shape, dtype=bool)
+    center_mask[center_cell] = True
+    flat_mask = _flatten_supercell(center_mask, flatten_order).astype(bool)
+    flat_indices = np.flatnonzero(flat_mask).astype(np.int64)
+
+    linear_ids = np.arange(int(np.prod(canonical_shape)), dtype=np.int64).reshape(canonical_shape)
+    flat_linear_ids = _flatten_supercell(linear_ids, flatten_order).astype(np.int64)
+    center_linear_ids = flat_linear_ids[flat_indices]
+    coord_indices = center_linear_ids % 3
+    atom_indices = (center_linear_ids // 3) % unit_cell_atoms
+    return center_cell, flat_indices, atom_indices.astype(np.int64), coord_indices.astype(np.int64)
 
 
 def _build_supercell_origins(crystal_shape, train_supercell_shape, stride_shape, periodic):
@@ -974,6 +1000,313 @@ class CrystalRNNNet:
             owner_order=owner_order,
             owner_reverse=owner_reverse,
         )
+
+
+class CrystalFlatEnergyRNNNet(CrystalRNNNet):
+    """Flat-history conservative RNN for central-cell accelerations.
+
+    The model keeps the original flat displacement-history input used by
+    ``CrystalRNNNet``.  Instead of predicting a full next frame, the recurrent
+    network emits one scalar block energy.  The central-cell acceleration is the
+    negative gradient of that scalar with respect to the current central-cell
+    displacements.  During crystal rollout, each local block updates only its
+    central unit cell.
+    """
+
+    def __init__(
+        self,
+        hidden_size,
+        num_layers,
+        in_features=None,
+        type="RNN",
+        train_supercell_shape=None,
+        unit_cell_atoms=None,
+        flatten_order=DEFAULT_FLATTEN_ORDER,
+        target_mode="acceleration",
+        delta_loss_weight=1.0,
+        delta_loss_epsilon=1e-6,
+        acceleration_loss_weight=0.0,
+        acceleration_loss_epsilon=1e-8,
+        loss_weight_mode="uniform",
+        center_loss_weight=1.0,
+        center_loss_alpha=1.0,
+        temporal_architecture="stacked",
+        energy_output_scale=1.0,
+    ):
+        if _normalize_target_mode(target_mode) != "acceleration":
+            raise ValueError("CrystalFlatEnergyRNNNet only supports target_mode='acceleration'")
+        super().__init__(
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            in_features=in_features,
+            type=type,
+            train_supercell_shape=train_supercell_shape,
+            unit_cell_atoms=unit_cell_atoms,
+            flatten_order=flatten_order,
+            target_mode="acceleration",
+            delta_loss_weight=delta_loss_weight,
+            delta_loss_epsilon=delta_loss_epsilon,
+            acceleration_loss_weight=acceleration_loss_weight,
+            acceleration_loss_epsilon=acceleration_loss_epsilon,
+            loss_weight_mode=loss_weight_mode,
+            center_loss_weight=center_loss_weight,
+            center_loss_alpha=center_loss_alpha,
+            temporal_architecture=temporal_architecture,
+        )
+        if not self.is_crystal_aware:
+            raise ValueError("CrystalFlatEnergyRNNNet requires train_supercell_shape and unit_cell_atoms")
+        self.architecture = "flat-energy"
+        self.energy_output_scale = np.asarray(float(energy_output_scale), dtype=np.float32)
+        self._refresh_center_layout()
+
+    def _refresh_center_layout(self):
+        """Rebuild cached central-cell feature mappings."""
+        (
+            self.center_cell,
+            self.center_feature_indices,
+            self.center_atom_indices,
+            self.center_coord_indices,
+        ) = _center_feature_layout(self.train_supercell_shape, self.unit_cell_atoms, self.flatten_order)
+
+    def _build_model(self):
+        """Create a flat recurrent scalar-energy model."""
+        architecture = _normalize_temporal_architecture(getattr(self, "temporal_architecture", "stacked"))
+        if architecture == "frame-layered":
+            return FrameLayerRNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type, out_features=1)
+        return RNNNet(self.in_features, self.hidden_size, self.num_layers, type=self.rnn_type, out_features=1)
+
+    def reset(self):
+        """Reinitialize the scalar-energy network."""
+        super().reset()
+        self._refresh_center_layout()
+
+    def _center_indices_tensor(self, reference):
+        """Return cached central feature indices on the same device as ``reference``."""
+        if not hasattr(self, "center_feature_indices"):
+            self._refresh_center_layout()
+        return torch.as_tensor(self.center_feature_indices, dtype=torch.long, device=reference.device)
+
+    def _center_flat_to_cell(self, center_flat):
+        """Restore central-cell flat values to ``(batch, atoms, 3)`` order."""
+        atom_indices = torch.as_tensor(self.center_atom_indices, dtype=torch.long, device=center_flat.device)
+        coord_indices = torch.as_tensor(self.center_coord_indices, dtype=torch.long, device=center_flat.device)
+        cell = torch.zeros(
+            (center_flat.shape[0], self.unit_cell_atoms, 3),
+            dtype=center_flat.dtype,
+            device=center_flat.device,
+        )
+        cell[:, atom_indices, coord_indices] = center_flat
+        return cell
+
+    def block_energy_flat(self, history):
+        """Return scalar block energies for flat displacement histories."""
+        raw_energy = self.model(history).reshape(-1)
+        scale = torch.as_tensor(self.energy_output_scale, dtype=raw_energy.dtype, device=raw_energy.device)
+        return raw_energy * scale
+
+    def predict_center_acceleration_flat(self, history, create_graph=None):
+        """Differentiate block energy to obtain central-cell accelerations."""
+        if history.ndim != 3:
+            raise ValueError("history must have shape (batch, sequence, in_features)")
+        if history.shape[-1] != self.in_features:
+            raise ValueError("history feature dimension does not match the model")
+        if history.shape[1] < 2:
+            raise ValueError("Flat-energy acceleration prediction requires at least two history frames")
+
+        if not history.requires_grad:
+            history = history.detach().clone().requires_grad_(True)
+        if create_graph is None:
+            create_graph = bool(torch.is_grad_enabled())
+
+        with torch.enable_grad():
+            with torch.backends.cudnn.flags(enabled=False):
+                energy = self.block_energy_flat(history)
+                gradient = torch.autograd.grad(
+                    energy.sum(),
+                    history,
+                    create_graph=create_graph,
+                    retain_graph=create_graph,
+                    only_inputs=True,
+                )[0]
+
+        center_indices = self._center_indices_tensor(gradient)
+        return -gradient[:, -1, center_indices]
+
+    def train(self, X_coords, y_coords, data_len=0.5):
+        """Train scalar energy from central-cell acceleration targets."""
+        X_coords = np.asarray(X_coords, dtype=np.float32)
+        y_coords = np.asarray(y_coords, dtype=np.float32)
+        if X_coords.ndim != 3:
+            raise ValueError("X_coords must have shape (samples, sequence, in_features)")
+        if y_coords.ndim != 2:
+            raise ValueError("y_coords must have shape (samples, in_features)")
+        if X_coords.shape[1] < 2:
+            raise ValueError("Flat-energy training requires at least two history frames")
+        if X_coords.shape[0] != y_coords.shape[0]:
+            raise ValueError("X_coords and y_coords must contain the same number of samples")
+
+        self.train_count = int(data_len * X_coords.shape[0])
+        if self.train_count <= 0:
+            raise ValueError("train_count must be positive")
+        if self.train_count >= X_coords.shape[0]:
+            ind = 0
+        else:
+            ind = np.random.randint(low=0, high=X_coords.shape[0] - self.train_count)
+
+        X_train = X_coords[ind : ind + self.train_count]
+        y_train = y_coords[ind : ind + self.train_count]
+        train_dataset = RNNCustomDataset(X_train, y_train)
+        train_data = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        optimizer = optim.Adam(params=self.model.parameters(), lr=self.lr)
+        losses = []
+        self.model.train()
+
+        for _ in tqdm.trange(self.epochs):
+            loss_mean = 0.0
+            lm_count = 0
+            for x_train, y_train in train_data:
+                x_train = x_train.detach().clone().requires_grad_(True)
+                true_acceleration = y_train - 2 * x_train[:, -1, :].detach() + x_train[:, -2, :].detach()
+                center_indices = self._center_indices_tensor(true_acceleration)
+                true_center_acceleration = true_acceleration.index_select(1, center_indices)
+                pred_center_acceleration = self.predict_center_acceleration_flat(x_train, create_graph=True)
+                loss = torch.mean((pred_center_acceleration - true_center_acceleration) ** 2)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                lm_count += 1
+                loss_mean = 1 / lm_count * loss.item() + (1 - 1 / lm_count) * loss_mean
+
+            losses.append(loss_mean)
+
+        return losses
+
+    def train_crystal_blocks(self, X_blocks, y_blocks, data_len=0.5, target_mode=None):
+        """Train from crystal-shaped block histories and next-frame targets."""
+        if target_mode is not None and _normalize_target_mode(target_mode) != "acceleration":
+            raise ValueError("CrystalFlatEnergyRNNNet only supports target_mode='acceleration'")
+        if not self.is_crystal_aware:
+            raise ValueError("Crystal metadata is required to train from crystal blocks")
+
+        X_blocks = np.asarray(X_blocks, dtype=np.float32)
+        y_blocks = np.asarray(y_blocks, dtype=np.float32)
+        if X_blocks.ndim != 7:
+            raise ValueError(
+                "X_blocks must have shape "
+                "(n_samples, sequence_length, bx, by, bz, unit_cell_atoms, 3)"
+            )
+        if y_blocks.ndim != 6:
+            raise ValueError("y_blocks must have shape (n_samples, bx, by, bz, unit_cell_atoms, 3)")
+        if tuple(X_blocks.shape[2:5]) != self.train_supercell_shape:
+            raise ValueError("X_blocks supercell shape does not match train_supercell_shape")
+        if tuple(y_blocks.shape[1:4]) != self.train_supercell_shape:
+            raise ValueError("y_blocks supercell shape does not match train_supercell_shape")
+        if tuple(X_blocks.shape[5:7]) != (self.unit_cell_atoms, 3):
+            raise ValueError("X_blocks atom/coordinate dimensions do not match crystal metadata")
+        if tuple(y_blocks.shape[4:6]) != (self.unit_cell_atoms, 3):
+            raise ValueError("y_blocks atom/coordinate dimensions do not match crystal metadata")
+        if X_blocks.shape[0] != y_blocks.shape[0]:
+            raise ValueError("X_blocks and y_blocks must contain the same number of samples")
+
+        X_coords = _flatten_crystal_block_samples(X_blocks, self.flatten_order)
+        y_coords = _flatten_crystal_block_targets(y_blocks, self.flatten_order)
+        return self.train(X_coords, y_coords, data_len=data_len)
+
+    def run(self, count_steps, init_features):
+        """Flat rollout is only well-defined when the whole block is the center."""
+        if self.train_supercell_shape != (1, 1, 1):
+            raise ValueError("CrystalFlatEnergyRNNNet predicts only the central cell; use run_crystal for block rollouts")
+        x = torch.as_tensor(init_features, dtype=torch.float32).clone()
+        predictions = []
+        self.model.eval()
+        for _ in range(count_steps):
+            center_acceleration = self.predict_center_acceleration_flat(x, create_graph=False)
+            y = 2 * x[0, -1] - x[0, -2]
+            y[self.center_feature_indices] += center_acceleration.squeeze(0)
+            predictions.append(y.detach().cpu().numpy())
+            x[0] = torch.vstack([x[0, 1:], y])
+        return np.asarray(predictions, dtype=np.float32)
+
+    def run_crystal(
+        self,
+        count_steps,
+        init_displacements,
+        train_supercell_shape=None,
+        unit_cell_atoms=None,
+        stride_shape=None,
+        periodic=False,
+        merge_mode="center",
+        merge_top_k=None,
+        merge_alpha=1.0,
+        owner_order=None,
+        owner_reverse=None,
+    ):
+        """Roll out a full crystal by applying each block to its central cell."""
+        del merge_mode, merge_top_k, merge_alpha, owner_order, owner_reverse
+        if train_supercell_shape is None:
+            train_supercell_shape = self.train_supercell_shape
+        else:
+            train_supercell_shape = _as_shape3("train_supercell_shape", train_supercell_shape)
+        if train_supercell_shape != self.train_supercell_shape:
+            raise ValueError("CrystalFlatEnergyRNNNet run_crystal requires the training supercell shape")
+
+        init_displacements = np.asarray(init_displacements, dtype=np.float32)
+        if unit_cell_atoms is None:
+            unit_cell_atoms = self.unit_cell_atoms if self.unit_cell_atoms is not None else int(init_displacements.shape[4])
+        if unit_cell_atoms != self.unit_cell_atoms:
+            raise ValueError("unit_cell_atoms does not match the trained model")
+
+        crystal_shape = tuple(int(dim) for dim in init_displacements.shape[1:4])
+        stride_shape = (1, 1, 1) if stride_shape is None else _as_shape3("stride_shape", stride_shape)
+        _validate_crystal_input(init_displacements, crystal_shape, unit_cell_atoms)
+        if init_displacements.shape[0] < 2:
+            raise ValueError("Flat-energy crystal rollout requires at least two history frames")
+
+        origins = _build_supercell_origins(crystal_shape, self.train_supercell_shape, stride_shape, periodic)
+        if not origins:
+            raise ValueError("No supercell origins were generated")
+        center_blocks = []
+        for origin in origins:
+            index = _supercell_indices(origin, self.train_supercell_shape, crystal_shape, periodic)
+            center_crystal_index = _crystal_index_from_ix(index, self.center_cell)
+            center_blocks.append((index, center_crystal_index))
+
+        self.model.eval()
+        model_device = next(self.model.parameters()).device
+        x = torch.as_tensor(init_displacements, dtype=torch.float32, device=model_device).clone()
+        predictions = []
+
+        for _ in range(count_steps):
+            block_histories = []
+            for index, _ in center_blocks:
+                block_x = x[(slice(None), *index, slice(None), slice(None))]
+                block_histories.append(
+                    torch.stack(
+                        [_torch_flatten_supercell(frame, self.flatten_order) for frame in block_x],
+                        dim=0,
+                    )
+                )
+            block_batch = torch.stack(block_histories, dim=0)
+            center_acceleration_flat = self.predict_center_acceleration_flat(block_batch, create_graph=False)
+            center_acceleration = self._center_flat_to_cell(center_acceleration_flat).detach()
+
+            acceleration_sum = torch.zeros_like(x[-1])
+            acceleration_weight = torch.zeros((*crystal_shape, unit_cell_atoms, 1), dtype=x.dtype, device=x.device)
+            for block_index, (_, center_crystal_index) in enumerate(center_blocks):
+                acceleration_sum[center_crystal_index] += center_acceleration[block_index]
+                acceleration_weight[center_crystal_index] += 1.0
+
+            if torch.any(acceleration_weight == 0):
+                raise ValueError("Some crystal cells were not covered by any centered block")
+            acceleration = acceleration_sum / acceleration_weight
+            y = 2 * x[-1] - x[-2] + acceleration
+            predictions.append(y.detach().cpu().numpy())
+            x[:-1] = x[1:].clone()
+            x[-1] = y
+
+        return np.asarray(predictions, dtype=np.float32)
 
 
 class CrystalRNNNetBagging:
