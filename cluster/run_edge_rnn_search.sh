@@ -123,6 +123,9 @@ if [[ "${MODE}" == "worker" ]]; then
     echo "CURL_LOSS_WEIGHT=${CURL_LOSS_WEIGHT:-0.0}"
     echo "CURL_LOSS_SAMPLE_COUNT=${CURL_LOSS_SAMPLE_COUNT:-4}"
     echo "CURL_LOSS_INTERVAL=${CURL_LOSS_INTERVAL:-1}"
+    echo "REFERENCE_PRESSURE_LOSS_WEIGHT=${REFERENCE_PRESSURE_LOSS_WEIGHT:-0.0}"
+    echo "REFERENCE_PRESSURE_TARGET=${REFERENCE_PRESSURE_TARGET:-0.0}"
+    echo "REFERENCE_PRESSURE_LOSS_SCALE=${REFERENCE_PRESSURE_LOSS_SCALE:-1.0}"
     echo "ACCELERATION_SCORE_WEIGHT=${ACCELERATION_SCORE_WEIGHT:-0.0}"
     echo "DEVICE=${DEVICE:-cuda}"
 
@@ -186,6 +189,9 @@ if [[ "${MODE}" == "worker" ]]; then
         --curl-loss-sample-count "${CURL_LOSS_SAMPLE_COUNT:-4}" \
         --curl-loss-interval "${CURL_LOSS_INTERVAL:-1}" \
         --curl-loss-epsilon "${CURL_LOSS_EPSILON:-1e-12}" \
+        --reference-pressure-loss-weight "${REFERENCE_PRESSURE_LOSS_WEIGHT:-0.0}" \
+        --reference-pressure-target "${REFERENCE_PRESSURE_TARGET:-0.0}" \
+        --reference-pressure-loss-scale "${REFERENCE_PRESSURE_LOSS_SCALE:-1.0}" \
         --velocity-window-frames "${VELOCITY_WINDOW_FRAMES:-10}" \
         --velocity-hist-bins "${VELOCITY_HIST_BINS:-80}" \
         --device "${DEVICE:-cuda}" \

@@ -31,22 +31,26 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--model-count", type=int, default=30)
     parser.add_argument("--base-seed", type=int, default=20260531)
     parser.add_argument("--data-path", default="data333_force.npz")
-    parser.add_argument("--delta-frames", type=int, default=90000)
+    parser.add_argument("--delta-frames", type=int, default=30000)
     parser.add_argument("--count-steps", type=int, default=2000)
     parser.add_argument("--count-run", type=int, default=3)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--data-len", type=float, default=1.0)
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--rnn-layers", type=int, default=1)
     parser.add_argument("--rnn-type", choices=["RNN", "GRU", "LSTM"], default="RNN")
-    parser.add_argument("--rnn-readout-mode", choices=["last-output", "final-hidden"], default="final-hidden")
-    parser.add_argument("--temporal-architecture", choices=["stacked", "frame-layered"], default="stacked")
+    parser.add_argument("--rnn-readout-mode", choices=["last-output", "final-hidden"], default="last-output")
+    parser.add_argument(
+        "--temporal-architecture",
+        choices=["stacked", "frame-layered", "mlp"],
+        default="mlp",
+    )
     parser.add_argument(
         "--temporal-input-mode",
         choices=["absolute-pair", "relative-to-first", "ref-plus-delta"],
-        default="absolute-pair",
+        default="ref-plus-delta",
     )
     parser.add_argument("--neighbor-shells", type=int, default=2)
     parser.add_argument("--cutoff-scale", type=float, default=1.05)
@@ -56,7 +60,7 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--acceleration-score-weight", type=float, default=0.0)
     parser.add_argument("--velocity-window-frames", type=int, default=10)
     parser.add_argument("--velocity-hist-bins", type=int, default=80)
-    parser.add_argument("--power-mean-loss-weight", type=float, default=0.1)
+    parser.add_argument("--power-mean-loss-weight", type=float, default=0.0)
     parser.add_argument("--q-power-loss-weight", type=float, default=0.0)
     parser.add_argument("--q-power-loss-mode", choices=["match", "positive-excess"], default="positive-excess")
     parser.add_argument("--q-power-loss-sample-count", type=int, default=2)
@@ -64,8 +68,11 @@ def parse_args(default_architecture: str | None = None) -> argparse.Namespace:
     parser.add_argument("--q-power-loss-margin", type=float, default=0.0)
     parser.add_argument("--q-power-loss-epsilon", type=float, default=1e-12)
     parser.add_argument("--q-power-loss-exclude-q-zero", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--acceleration-over-rms-loss-weight", type=float, default=0.1)
-    parser.add_argument("--acceleration-under-rms-loss-weight", type=float, default=0.01)
+    parser.add_argument("--acceleration-over-rms-loss-weight", type=float, default=0.0)
+    parser.add_argument("--acceleration-under-rms-loss-weight", type=float, default=0.0)
+    parser.add_argument("--reference-pressure-loss-weight", type=float, default=0.0)
+    parser.add_argument("--reference-pressure-target", type=float, default=0.0)
+    parser.add_argument("--reference-pressure-loss-scale", type=float, default=1.0)
     parser.add_argument("--train-partition", default=cluster["train_partition"])
     parser.add_argument("--train-nodelist", default=cluster["train_nodelist"])
     parser.add_argument("--train-time", default="12:00:00")
@@ -100,8 +107,13 @@ def default_run_label(args: argparse.Namespace) -> str:
     q_power_tag = f"_qpow_w{args.q_power_loss_weight:g}" if args.q_power_loss_weight > 0 else ""
     temporal_tag = "" if args.temporal_architecture == "stacked" else f"_{args.temporal_architecture}"
     temporal_input_tag = "" if args.temporal_input_mode == "absolute-pair" else f"_{args.temporal_input_mode}"
+    encoder_tag = (
+        "mlp"
+        if args.temporal_architecture == "mlp"
+        else f"{args.rnn_type.lower()}_{args.rnn_readout_mode.replace('-', '')}"
+    )
     return (
-        f"{architecture}_rnn_finalhidden_rl{args.rnn_layers}_force"
+        f"{architecture}_{encoder_tag}_l{args.rnn_layers}_force"
         f"{temporal_tag}"
         f"{temporal_input_tag}"
         f"_pmean_w{args.power_mean_loss_weight:g}"
@@ -164,6 +176,9 @@ def main(default_architecture: str | None = None) -> int:
         "Q_POWER_LOSS_EXCLUDE_Q_ZERO": "true" if args.q_power_loss_exclude_q_zero else "false",
         "ACCELERATION_OVER_RMS_LOSS_WEIGHT": str(args.acceleration_over_rms_loss_weight),
         "ACCELERATION_UNDER_RMS_LOSS_WEIGHT": str(args.acceleration_under_rms_loss_weight),
+        "REFERENCE_PRESSURE_LOSS_WEIGHT": str(args.reference_pressure_loss_weight),
+        "REFERENCE_PRESSURE_TARGET": str(args.reference_pressure_target),
+        "REFERENCE_PRESSURE_LOSS_SCALE": str(args.reference_pressure_loss_scale),
         "TRAIN_PARTITION": args.train_partition,
         "TRAIN_NODELIST": args.train_nodelist,
         "TRAIN_TIME": args.train_time,

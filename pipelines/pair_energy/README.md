@@ -20,16 +20,63 @@ differentiating it.  This is the conservative pair paradigm.
 - `docs/PAIR_ENERGY_ARCHITECTURE.svg`: editable vector architecture diagram.
 - `docs/PAIR_ENERGY_ARCHITECTURE.png`: rendered architecture diagram.
 
-## Recommended Inference Defaults
+## Paper Baseline
 
-The current best-tested path is a clean Bussi NVT run:
+The paper baseline is a one-frame pair-energy MLP in the fixed FCC lattice
+frame:
+
+- temporal architecture: `mlp`;
+- temporal input: `ref-plus-delta`;
+- model frames: `1` (`--rnn-layers 1` is retained as a compatibility name);
+- local context: `3x3x3` unit cells;
+- joint prediction target: all four atoms of the central unit cell;
+- neighbors: two FCC shells (`18` neighbors per central atom);
+- training target: force-derived acceleration;
+- temperature and reference state: `300 K` at the fixed reference cell;
+- auxiliary loss weights: zero for the headline force-only model.
+
+With `hidden_size=128` and the historical compatibility setting
+`bidirectional=True` (which sets the MLP representation width to 256), the
+model has `67,841` trainable parameters.
+
+Prepared datasets can still store three history frames. The search code takes
+only the latest frame for MLP1 training, while rollout and ASE retain enough
+physical history to initialize velocity and Verlet integration.
+
+### Search
+
+The pair-energy wrappers now use the paper baseline by default:
+
+```bash
+python pipelines/pair_energy/search/find_models.py 10 RNN \
+  --data-path data333_force.npz \
+  --models-dir models333_pair_energy_mlp_refplusdelta_d30k \
+  --delta-frames 30000 \
+  --epochs 50 \
+  --save-all
+```
+
+The `RNN` positional argument is retained for compatibility with the shared
+search CLI and is ignored by the MLP temporal encoder.
+
+The corresponding cluster submission is:
+
+```bash
+python pipelines/pair_energy/cluster/submit_search.py \
+  --run-label paper_pair_energy_mlp_refplusdelta_d30k \
+  --model-count 30
+```
+
+### Inference
+
+Use the selected checkpoint in a clean Bussi NVT run:
 
 ```bash
 python pipelines/pair_energy/cluster/submit_inference_1055.py \
-  --model-path models333_pair_energy_rnn_finalhidden_rl1_force_pmean_w01_aover_w01_aunder_w001_d90k_30/mean_norm_0.6663052760722262_rnn_pair_energy_rnn_acceleration_h128_rl1_readoutfinalhidden_bidir_shells2_n18_targetforce_accnormglobal_pmean0.1_aover0.1_aunder0.01_op2_up2.pth \
+  --model-path '<path-to-selected-refplusdelta-mlp-checkpoint.pth>' \
   --data-path data1055.npz \
-  --label pair_energy_best_1055_50000_bussi200_nointernal \
-  --state-path logs/ase1055_pair_energy_best_50000_bussi200_nointernal_state.json \
+  --label paper_refplusdelta_mlp_1055_50000_bussi200 \
+  --state-path logs/paper_refplusdelta_mlp_1055_50000_state.json \
   --steps 50000 \
   --dt-ps 0.002 \
   --temperature-k 300 \
@@ -44,7 +91,7 @@ Then fetch the lightweight results:
 
 ```bash
 python pipelines/pair_energy/cluster/fetch_inference_1055.py \
-  --state-path logs/ase1055_pair_energy_best_50000_bussi200_nointernal_state.json
+  --state-path logs/paper_refplusdelta_mlp_1055_50000_state.json
 ```
 
 The most important energy-aware outputs are:
@@ -62,9 +109,9 @@ RNN history and ASE velocities.  It does not project the trajectory after every
 MD step.  Use `initial-every-step`, `zero-every-step`, or
 `constant-velocity-every-step` only for explicit constrained-control tests.
 
-## Experimental Frame-Layered Temporal Core
+## Temporal-History Control
 
-The pair-energy search can use a frame-layered recurrent core:
+The article control experiment can use a frame-layered recurrent core:
 
 ```bash
 python pipelines/pair_energy/cluster/submit_search.py \
@@ -100,9 +147,9 @@ python pipelines/pair_energy/cluster/submit_search.py \
   --rnn-layers 2
 ```
 
-## Experimental Ref-Plus-Delta Pair Input
+## Ref-Plus-Delta Pair Input
 
-The `ref-plus-delta` input keeps the usual history length but separates the
+The headline `ref-plus-delta` input separates the
 large equilibrium pair vector from the small dynamic displacement difference.
 Each pair/time sample has six channels:
 
@@ -110,10 +157,29 @@ Each pair/time sample has six channels:
 - `(u_neighbor-u_center)/a0`.
 
 For pair-energy models, forces are differentiated only through the dynamic
-displacement channels.  A search can be submitted with:
+displacement channels. The MLP1 paper baseline is selected with:
 
 ```bash
 python pipelines/pair_energy/cluster/submit_search.py \
+  --temporal-architecture mlp \
   --temporal-input-mode ref-plus-delta \
+  --rnn-layers 1 \
   --run-label pair_energy_ref_plus_delta_test
 ```
+
+## Optional Reference-Pressure Anchor
+
+The headline model is force-only and uses a zero pressure-loss weight. The
+supporting mechanical experiment adds the reference-lattice condition described
+in the manuscript:
+
+```bash
+python pipelines/pair_energy/cluster/submit_search.py \
+  --run-label paper_refplusdelta_mlp_pref1e4 \
+  --reference-pressure-loss-weight 10000 \
+  --reference-pressure-target 0 \
+  --reference-pressure-loss-scale 1
+```
+
+This term is evaluated at zero displacement in the fixed reference cell. It is
+an optional mechanical anchor and is not enabled by the paper baseline defaults.

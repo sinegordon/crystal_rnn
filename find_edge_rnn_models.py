@@ -1,4 +1,4 @@
-"""Train and select edge-vector temporal RNN crystal acceleration models."""
+"""Train and select local edge/pair crystal force models."""
 
 import argparse
 from pathlib import Path
@@ -46,7 +46,11 @@ def parse_args():
     """Parse command-line options."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("count_models", type=int, help="Number of candidate models to train.")
-    parser.add_argument("rnn_type", choices=["RNN", "GRU", "LSTM"], help="Temporal recurrent block type.")
+    parser.add_argument(
+        "rnn_type",
+        choices=["RNN", "GRU", "LSTM"],
+        help="Recurrent block type; retained for compatibility and ignored by temporal MLP models.",
+    )
     parser.add_argument("--data-path", default="data333.npz")
     parser.add_argument("--eval-data-path", default=None, help="Optional 300 K evaluation dataset.")
     parser.add_argument("--models-dir", default="models333_edge_rnn")
@@ -71,13 +75,14 @@ def parse_args():
     )
     parser.add_argument(
         "--temporal-architecture",
-        choices=["stacked", "frame-layered"],
+        choices=["stacked", "frame-layered", "mlp"],
         default="stacked",
         help=(
             "Temporal core for pair-energy models. 'stacked' uses PyTorch "
             "nn.RNN/GRU/LSTM num_layers; 'frame-layered' assigns each history "
             "frame to its own recurrent cell, so rnn-layers must equal the "
-            "sequence length after temporal input preprocessing."
+            "sequence length after temporal input preprocessing; 'mlp' flattens "
+            "the selected model frames and uses a feed-forward encoder."
         ),
     )
     parser.add_argument(
@@ -329,6 +334,24 @@ def parse_args():
         default=1e-12,
         help="Numerical floor for normalized curl loss.",
     )
+    parser.add_argument(
+        "--reference-pressure-loss-weight",
+        type=float,
+        default=0.0,
+        help="Weight of the optional zero-pressure anchor at the reference lattice.",
+    )
+    parser.add_argument(
+        "--reference-pressure-target",
+        type=float,
+        default=0.0,
+        help="Target configurational pressure in model pressure units.",
+    )
+    parser.add_argument(
+        "--reference-pressure-loss-scale",
+        type=float,
+        default=1.0,
+        help="Positive normalization scale for the reference-pressure loss.",
+    )
     parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
@@ -419,6 +442,12 @@ def validate_args(args):
         raise ValueError("curl-loss-interval must be positive")
     if args.curl_loss_epsilon <= 0:
         raise ValueError("curl-loss-epsilon must be positive")
+    if args.reference_pressure_loss_weight < 0:
+        raise ValueError("reference-pressure-loss-weight must be non-negative")
+    if args.reference_pressure_loss_scale <= 0:
+        raise ValueError("reference-pressure-loss-scale must be positive")
+    if args.reference_pressure_loss_weight > 0 and args.architecture != "pair-energy":
+        raise ValueError("reference-pressure-loss-weight is only supported with --architecture pair-energy")
     if (
         args.displacement_moment_loss_weight > 0
         and args.displacement_moment_mean_weight == 0
@@ -523,6 +552,35 @@ def sample_edge_train_data(data, delta, sequence_length, rng, training_target, l
     )
 
 
+def temporal_raw_sequence_length(args, data_sequence_length):
+    """Return the number of prepared history frames consumed by the model.
+
+    The dataset can retain a longer integration history than the temporal
+    encoder consumes. In particular, the article MLP1 model uses only the
+    latest frame of each prepared three-frame sample.
+    """
+    if args.temporal_architecture not in {"frame-layered", "mlp"}:
+        return int(data_sequence_length)
+    raw_length = int(args.rnn_layers)
+    if args.temporal_input_mode == "relative-to-first":
+        raw_length += 1
+    return raw_length
+
+
+def slice_temporal_history_blocks(X_blocks, raw_sequence_length):
+    """Keep the latest raw frames consumed by a short temporal encoder."""
+    raw_sequence_length = int(raw_sequence_length)
+    if raw_sequence_length <= 0:
+        raise ValueError("raw temporal sequence length must be positive")
+    if raw_sequence_length > X_blocks.shape[1]:
+        raise ValueError(
+            f"model expects {raw_sequence_length} raw frames, but X_blocks contain {X_blocks.shape[1]}"
+        )
+    if raw_sequence_length == X_blocks.shape[1]:
+        return X_blocks
+    return X_blocks[:, -raw_sequence_length:]
+
+
 def weight_tag(value):
     """Return a compact stable tag for filename weights."""
     return f"{float(value):g}"
@@ -589,7 +647,14 @@ def save_model(model, models_dir, norm, args):
             f"_curl{weight_tag(model.curl_loss_weight)}"
             f"_cs{int(model.curl_loss_sample_count)}"
             f"_ci{int(model.curl_loss_interval)}"
-    )
+        )
+    reference_pressure_tag = ""
+    if getattr(model, "reference_pressure_loss_weight", 0.0) > 0:
+        reference_pressure_tag = (
+            f"_pref{weight_tag(model.reference_pressure_loss_weight)}"
+            f"_pt{weight_tag(model.reference_pressure_target)}"
+            f"_ps{weight_tag(model.reference_pressure_loss_scale)}"
+        )
     architecture = getattr(model, "architecture", getattr(args, "architecture", "edge"))
     architecture_tag = {
         "edge": "edge_rnn",
@@ -613,7 +678,7 @@ def save_model(model, models_dir, norm, args):
         f"_target{training_target}"
         f"_accnorm{model.acceleration_normalization}"
         f"{moment_tag}{power_tag}{q_power_tag}{acceleration_rms_tag}{acceleration_batch_rms_tag}"
-        f"{acceleration_tail_tag}{acceleration_asymmetric_rms_tag}{curl_tag}.pth"
+        f"{acceleration_tail_tag}{acceleration_asymmetric_rms_tag}{curl_tag}{reference_pressure_tag}.pth"
     )
     path = models_path / filename
     torch.save(model, path)
@@ -697,6 +762,9 @@ def write_metrics(path, rows):
         "curl_loss_sample_count",
         "curl_loss_interval",
         "curl_loss_epsilon",
+        "reference_pressure_loss_weight",
+        "reference_pressure_target",
+        "reference_pressure_loss_scale",
         "device",
         "final_train_loss",
         "best_train_loss",
@@ -715,7 +783,7 @@ def write_metrics(path, rows):
 
 
 def main():
-    """Train and evaluate edge-vector RNN candidates."""
+    """Train and evaluate local edge/pair force-model candidates."""
     args = parse_args()
     validate_args(args)
     rng = np.random.default_rng(args.seed)
@@ -729,19 +797,27 @@ def main():
     eval_data = data if args.eval_data_path is None else load_training_data(args.eval_data_path)
     validate_training_eval_compatibility(data, eval_data)
     sequence_length = model_sequence_length(data)
-    effective_sequence_length = sequence_length - 1 if args.temporal_input_mode == "relative-to-first" else sequence_length
     if args.temporal_input_mode == "relative-to-first" and sequence_length != 3:
         raise ValueError(
             "--temporal-input-mode relative-to-first expects exactly three raw history frames "
             f"in the dataset, got {sequence_length}"
         )
-    if args.temporal_architecture == "frame-layered":
+    if args.temporal_architecture in {"frame-layered", "mlp"}:
         if args.architecture != "pair-energy":
-            raise ValueError("--temporal-architecture frame-layered is currently implemented only for pair-energy")
-        if args.rnn_layers != effective_sequence_length:
+            raise ValueError("--temporal-architecture frame-layered/mlp is implemented only for pair-energy")
+        raw_sequence_length = temporal_raw_sequence_length(args, sequence_length)
+        effective_model_sequence_length = (
+            raw_sequence_length - 1 if args.temporal_input_mode == "relative-to-first" else raw_sequence_length
+        )
+        if raw_sequence_length > sequence_length:
             raise ValueError(
-                "--temporal-architecture frame-layered requires --rnn-layers "
-                f"to match the recurrent input sequence length ({effective_sequence_length})"
+                f"--temporal-architecture {args.temporal_architecture} expects {raw_sequence_length} "
+                f"raw frames, but the dataset contains only {sequence_length}"
+            )
+        if effective_model_sequence_length != args.rnn_layers:
+            raise ValueError(
+                f"--temporal-architecture {args.temporal_architecture} expects the effective model "
+                f"sequence length ({effective_model_sequence_length}) to match --rnn-layers ({args.rnn_layers})"
             )
     rows = []
 
@@ -816,6 +892,9 @@ def main():
         model.curl_loss_sample_count = args.curl_loss_sample_count
         model.curl_loss_interval = args.curl_loss_interval
         model.curl_loss_epsilon = args.curl_loss_epsilon
+        model.reference_pressure_loss_weight = args.reference_pressure_loss_weight
+        model.reference_pressure_target = args.reference_pressure_target
+        model.reference_pressure_loss_scale = args.reference_pressure_loss_scale
 
         train_displacements, X_train_blocks, target_train_blocks, displacement_y_train_blocks = sample_edge_train_data(
             data=data,
@@ -825,6 +904,10 @@ def main():
             training_target=args.training_target,
             label="TRAIN",
         )
+        model_raw_sequence_length = temporal_raw_sequence_length(args, model_sequence_length(data))
+        X_train_blocks = slice_temporal_history_blocks(X_train_blocks, model_raw_sequence_length)
+        print("MODEL_RAW_SEQUENCE_LENGTH =", model_raw_sequence_length)
+        print("X_TRAIN_BLOCKS =", X_train_blocks.shape)
         losses = model.train_crystal_blocks(
             X_train_blocks,
             target_train_blocks,
@@ -974,6 +1057,9 @@ def main():
                 "curl_loss_sample_count": model.curl_loss_sample_count,
                 "curl_loss_interval": model.curl_loss_interval,
                 "curl_loss_epsilon": model.curl_loss_epsilon,
+                "reference_pressure_loss_weight": model.reference_pressure_loss_weight,
+                "reference_pressure_target": model.reference_pressure_target,
+                "reference_pressure_loss_scale": model.reference_pressure_loss_scale,
                 "device": str(model.torch_device),
                 "final_train_loss": float(losses[-1]) if losses else np.nan,
                 "best_train_loss": float(np.min(losses)) if losses else np.nan,

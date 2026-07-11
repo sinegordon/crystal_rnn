@@ -69,7 +69,7 @@ def _normalize_rnn_readout_mode(mode):
 
 
 def _normalize_temporal_architecture(mode):
-    """Validate how history frames are routed through the recurrent core."""
+    """Validate how history frames are routed through the temporal core."""
     mode = str(mode).lower().replace("_", "-")
     aliases = {
         "stacked": "stacked",
@@ -80,9 +80,14 @@ def _normalize_temporal_architecture(mode):
         "frame-layered": "frame-layered",
         "frame-layer": "frame-layered",
         "per-frame": "frame-layered",
+        "mlp": "mlp",
+        "ffn": "mlp",
+        "feed-forward": "mlp",
+        "feedforward": "mlp",
+        "dense": "mlp",
     }
     if mode not in aliases:
-        raise ValueError("temporal_architecture must be 'stacked' or 'frame-layered'")
+        raise ValueError("temporal_architecture must be 'stacked', 'frame-layered', or 'mlp'")
     return aliases[mode]
 
 
@@ -434,7 +439,7 @@ class _OddPairForceRNN(nn.Module):
 
 
 class _EvenPairEnergyRNN(nn.Module):
-    """Shared edge RNN that predicts an even scalar pair potential.
+    """Shared temporal encoder that predicts an even scalar pair potential.
 
     Forces are later obtained by differentiating this scalar with respect to
     the current pair vector.  The explicit even symmetrization keeps the energy
@@ -460,8 +465,19 @@ class _EvenPairEnergyRNN(nn.Module):
         self.bidirectional = bool(bidirectional)
         self.readout_mode = _normalize_rnn_readout_mode(readout_mode)
         self.temporal_architecture = _normalize_temporal_architecture(temporal_architecture)
-        if self.temporal_architecture == "frame-layered":
+        if self.temporal_architecture == "mlp":
             self.rnn = None
+            self.temporal_encoder = None
+            self.mlp_sequence_length = self.rnn_layers
+            encoder_input_width = self.input_size * self.mlp_sequence_length
+            encoder_output_width = self.hidden_size * (2 if self.bidirectional else 1)
+            self.mlp_encoder = nn.Sequential(
+                nn.Linear(encoder_input_width, encoder_output_width),
+                nn.ELU(inplace=True),
+            )
+        elif self.temporal_architecture == "frame-layered":
+            self.rnn = None
+            self.mlp_encoder = None
             self.temporal_encoder = _FrameLayerTemporalEncoder(
                 input_size=self.input_size,
                 hidden_size=self.hidden_size,
@@ -479,6 +495,7 @@ class _EvenPairEnergyRNN(nn.Module):
                 bidirectional=self.bidirectional,
                 dropout=float(dropout) if self.rnn_layers > 1 else 0.0,
             )
+            self.mlp_encoder = None
             self.temporal_encoder = None
         recurrent_width = self.hidden_size * (2 if self.bidirectional else 1)
         self.head = nn.Sequential(
@@ -489,7 +506,14 @@ class _EvenPairEnergyRNN(nn.Module):
 
     def raw_forward(self, x):
         """Return unconstrained scalar pair energies."""
-        if getattr(self, "temporal_architecture", "stacked") == "frame-layered":
+        temporal_architecture = getattr(self, "temporal_architecture", "stacked")
+        if temporal_architecture == "mlp":
+            if x.ndim != 3:
+                raise ValueError("MLP temporal encoder expects input shape (batch, sequence, features)")
+            if x.shape[1] != getattr(self, "mlp_sequence_length", self.rnn_layers):
+                raise ValueError("MLP temporal encoder sequence length must equal rnn_layers")
+            readout = self.mlp_encoder(x.reshape(x.shape[0], -1))
+        elif temporal_architecture == "frame-layered":
             readout = self.temporal_encoder(x)
         else:
             output, hidden = self.rnn(x)
@@ -587,6 +611,9 @@ class CrystalEdgeRNNNet:
         self.curl_loss_sample_count = 4
         self.curl_loss_interval = 1
         self.curl_loss_epsilon = 1e-12
+        self.reference_pressure_loss_weight = 0.0
+        self.reference_pressure_target = 0.0
+        self.reference_pressure_loss_scale = 1.0
 
     def _temporal_feature_patches(self, patches):
         """Return the history frames that should be encoded by the RNN.
@@ -1596,6 +1623,16 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             "curl_loss_epsilon",
             getattr(self, "curl_loss_epsilon", 1e-12),
         )
+        reference_pressure_loss_weight = _normalize_nonnegative_float(
+            "reference_pressure_loss_weight",
+            getattr(self, "reference_pressure_loss_weight", 0.0),
+        )
+        self.reference_pressure_loss_weight = reference_pressure_loss_weight
+        self.reference_pressure_target = float(getattr(self, "reference_pressure_target", 0.0))
+        self.reference_pressure_loss_scale = _normalize_positive_float(
+            "reference_pressure_loss_scale",
+            getattr(self, "reference_pressure_loss_scale", 1.0),
+        )
         if X_blocks.ndim != 7:
             raise ValueError("X_blocks must have shape (n, sequence, 3, 3, 3, atoms, 3)")
         if y_blocks.ndim != 6:
@@ -1606,8 +1643,8 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             raise ValueError("X_blocks and y_blocks must contain the same number of samples")
         if X_blocks.shape[5] != self.unit_cell_atoms or y_blocks.shape[4] != self.unit_cell_atoms:
             raise ValueError("unit_cell_atoms does not match model metadata")
-        if X_blocks.shape[1] < 2:
-            raise ValueError("At least two history frames are required for acceleration targets")
+        if X_blocks.shape[1] < 1:
+            raise ValueError("At least one model input frame is required")
         if (
             moment_loss_weight > 0
             and self.displacement_moment_mean_weight == 0
@@ -1626,6 +1663,13 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
             or acceleration_under_rms_loss_weight > 0
         )
         needs_curl_loss = curl_loss_weight > 0
+        needs_reference_pressure_loss = reference_pressure_loss_weight > 0
+        if needs_reference_pressure_loss and getattr(self, "architecture", None) != "pair-energy":
+            raise ValueError("reference pressure loss is only supported by pair-energy models")
+        if X_blocks.shape[1] < 2 and (training_target == "displacement" or needs_displacement_y):
+            raise ValueError(
+                "At least two history frames are required for displacement-derived targets or losses"
+            )
         if needs_displacement_y:
             if displacement_y_blocks is None:
                 if training_target == "displacement":
@@ -1761,6 +1805,10 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
                         batch[q_power_batch_index + 2].to(self.torch_device),
                         training_target,
                     )
+                if needs_reference_pressure_loss:
+                    loss = loss + reference_pressure_loss_weight * self._reference_pressure_loss(
+                        features.shape[-2],
+                    )
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -1879,6 +1927,25 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
         for local_index, center in enumerate(batch_centers):
             acceleration[(*center, slice(None), slice(None))] = center_acceleration[local_index]
 
+    def _model_history_from_integration_history(self, history):
+        """Return the suffix of physical history consumed by the model.
+
+        Verlet integration needs at least two physical frames to define the
+        current velocity, while an MLP force model can consume only the latest
+        displacement frame. Frame-layered models similarly have a fixed input
+        length independent of the integration history kept by the caller.
+        """
+        if getattr(self, "temporal_architecture", "stacked") not in {"frame-layered", "mlp"}:
+            return history
+        raw_length = int(self.rnn_layers)
+        if _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair")) == "relative-to-first":
+            raw_length += 1
+        if history.shape[0] < raw_length:
+            raise ValueError(
+                f"Model needs {raw_length} raw history frames, but only {history.shape[0]} were provided"
+            )
+        return history[-raw_length:]
+
     def predict_full_accelerations(self, history, periodic=True, patch_batch_size=250, pair_scatter=None):
         """Predict one full-crystal acceleration frame.
 
@@ -1896,13 +1963,14 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
         crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
         scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic) if pair_scatter else None
         centers = scatter_indices["centers"] if pair_scatter else build_centers(crystal_shape, periodic=periodic)
+        model_history = self._model_history_from_integration_history(history)
         acceleration = np.zeros_like(history[-1], dtype=np.float32)
         acceleration_flat = acceleration.reshape(-1, 3)
 
         for start in range(0, len(centers), patch_batch_size):
             stop = min(start + patch_batch_size, len(centers))
             batch_centers = centers[start : start + patch_batch_size]
-            patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
+            patch_batch = _extract_patch_batch(model_history, batch_centers, self.patch_shape, periodic)
             pair_contributions = self.predict_pair_contributions(patch_batch)
             if not pair_scatter:
                 self._assign_center_accelerations(acceleration, batch_centers, pair_contributions)
@@ -1946,10 +2014,11 @@ class CrystalPairForceRNNNet(CrystalEdgeRNNNet):
 
 
 class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
-    """Pair-potential RNN trained from force/acceleration targets.
+    """Pair-energy model trained from force/acceleration targets.
 
-    The recurrent model maps each local pair-vector history to a scalar
-    potential-like quantity.  Central-cell accelerations are obtained as
+    The selected temporal encoder maps each local pair input to a scalar
+    potential. The paper baseline uses a one-frame MLP; recurrent encoders are
+    retained for compatibility and ablations. Central-cell accelerations are obtained as
     ``-grad U`` with respect to the current central displacements, which makes
     the learned local force field conservative by construction for a fixed
     history context.
@@ -2049,6 +2118,69 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         )
         return gradient[..., -1, dynamic_slice] / scale
 
+    def _reference_sequence_features(self, sequence_length):
+        """Return pair features for the undeformed reference unit cell."""
+        sequence_length = int(sequence_length)
+        if sequence_length <= 0:
+            raise ValueError("reference pressure sequence_length must be positive")
+        mode = _normalize_temporal_input_mode(getattr(self, "temporal_input_mode", "absolute-pair"))
+        if mode == "relative-to-first":
+            raise ValueError("reference pressure loss is not defined for relative-to-first input")
+
+        reference_vectors = torch.as_tensor(
+            self.reference_vectors,
+            dtype=torch.float32,
+            device=self.torch_device,
+        )
+        scale = torch.as_tensor(self.lattice_parameter, dtype=torch.float32, device=self.torch_device)
+        normalized_reference = reference_vectors / scale
+        if mode == "ref-plus-delta":
+            base = torch.cat((normalized_reference, torch.zeros_like(normalized_reference)), dim=-1)
+        else:
+            base = normalized_reference
+        return base.unsqueeze(0).unsqueeze(3).expand(
+            1,
+            self.unit_cell_atoms,
+            self.neighbor_count,
+            sequence_length,
+            base.shape[-1],
+        )
+
+    def _unit_cell_volume(self):
+        """Return the orthorhombic reference unit-cell volume in Angstrom^3."""
+        crystal_shape = np.asarray(self.atom_order.shape[:3], dtype=np.float64)
+        unit_lengths = np.asarray(self.box_lengths, dtype=np.float64) / crystal_shape
+        return float(np.prod(unit_lengths))
+
+    def _reference_pressure_loss(self, sequence_length):
+        """Penalize configurational pressure at the undeformed reference cell."""
+        features = self._reference_sequence_features(sequence_length)
+        contributions = self._pair_contributions_from_features(features, create_graph=True)[0]
+        reference_vectors = torch.as_tensor(
+            self.reference_vectors,
+            dtype=contributions.dtype,
+            device=contributions.device,
+        )
+        # The stencil stores both pair orientations, hence the factor one half.
+        virial = 0.5 * torch.einsum("ani,anj->ij", reference_vectors, contributions)
+        volume = torch.as_tensor(
+            self._unit_cell_volume(),
+            dtype=contributions.dtype,
+            device=contributions.device,
+        )
+        pressure = -torch.trace(virial) / (3.0 * volume)
+        target = torch.as_tensor(
+            float(self.reference_pressure_target),
+            dtype=contributions.dtype,
+            device=contributions.device,
+        )
+        pressure_scale = torch.as_tensor(
+            float(self.reference_pressure_loss_scale),
+            dtype=contributions.dtype,
+            device=contributions.device,
+        )
+        return ((pressure - target) / pressure_scale) ** 2
+
     def _pair_contributions_and_energies_from_features(self, features, create_graph=None):
         """Return conservative pair contributions and the scalar pair energies."""
         if not features.requires_grad:
@@ -2123,6 +2255,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
         scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic) if pair_scatter else None
         centers = scatter_indices["centers"] if pair_scatter else build_centers(crystal_shape, periodic=periodic)
+        model_history = self._model_history_from_integration_history(history)
         acceleration = np.zeros_like(history[-1], dtype=np.float32)
         acceleration_flat = acceleration.reshape(-1, 3)
         total_energy = 0.0
@@ -2130,7 +2263,7 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         for start in range(0, len(centers), patch_batch_size):
             stop = min(start + patch_batch_size, len(centers))
             batch_centers = centers[start:stop]
-            patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
+            patch_batch = _extract_patch_batch(model_history, batch_centers, self.patch_shape, periodic)
             pair_contributions, pair_energies = self.predict_pair_contributions_and_energies(patch_batch)
             if not pair_scatter:
                 self._assign_center_accelerations(acceleration, batch_centers, pair_contributions)
@@ -2156,12 +2289,13 @@ class CrystalPairEnergyRNNNet(CrystalPairForceRNNNet):
         crystal_shape = tuple(int(dim) for dim in history.shape[1:4])
         scatter_indices = self._full_pair_scatter_indices(crystal_shape, periodic)
         centers = scatter_indices["centers"]
+        model_history = self._model_history_from_integration_history(history)
         total = 0.0
 
         for start in range(0, len(centers), patch_batch_size):
             stop = min(start + patch_batch_size, len(centers))
             batch_centers = centers[start:stop]
-            patch_batch = _extract_patch_batch(history, batch_centers, self.patch_shape, periodic)
+            patch_batch = _extract_patch_batch(model_history, batch_centers, self.patch_shape, periodic)
             pair_energies = self.predict_pair_energies(patch_batch)
             total += self._scatter_pair_contributions(
                 None,
