@@ -114,6 +114,69 @@ python pipelines/mlp/search/find_models.py 1 \
     if result.returncode:
         return result.returncode
     match = re.search(r"Submitted batch job (\d+)", result.stdout)
+    array_job_id = "" if match is None else match.group(1)
+    if not args.dry_run and not array_job_id:
+        raise RuntimeError("Could not parse the Slurm array job id")
+    collect_script = f'''#!/bin/bash
+#SBATCH --job-name={label}_collect
+#SBATCH --partition={args.partition}
+#SBATCH --nodelist={args.nodelist}
+#SBATCH --time=00:20:00
+#SBATCH --mem=2G
+#SBATCH --cpus-per-task=1
+#SBATCH --output={log_root}/collect_%j.out
+#SBATCH --error={log_root}/collect_%j.err
+set -euo pipefail
+cd {remote_cd(args.remote_workdir)}
+eval "$(conda shell.bash hook)"
+conda activate {shlex.quote(args.conda_env)}
+python - <<'PY'
+import csv
+import glob
+import math
+from pathlib import Path
+
+output_root = Path("{output_root}")
+rows = []
+for path in glob.glob(str(output_root / "task_*" / "metrics.tsv")):
+    with open(path, encoding="utf-8") as stream:
+        rows.extend(csv.DictReader(stream, delimiter="\\t"))
+rows.sort(key=lambda row: float(row["selection_score"]) if math.isfinite(float(row["selection_score"])) else math.inf)
+if rows:
+    with (output_root / "all_metrics.tsv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]), delimiter="\\t")
+        writer.writeheader()
+        writer.writerows(rows)
+    with (output_root / "top10.tsv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]), delimiter="\\t")
+        writer.writeheader()
+        writer.writerows(rows[:10])
+summary = [f"completed={{len(rows)}}", f"expected={args.model_count}"]
+for rank, row in enumerate(rows[:10], 1):
+    summary.append(
+        f'{{rank}}\\t{{float(row["selection_score"]):.6f}}\\t'
+        f'{{float(row["sqw_norm"]):.6f}}\\t{{row["model_path"]}}'
+    )
+(output_root / "summary.txt").write_text("\\n".join(summary) + "\\n", encoding="utf-8")
+print("\\n".join(summary))
+PY
+'''
+    collect_encoded = base64.b64encode(collect_script.encode()).decode()
+    collect_remote = (
+        f"cd {remote_cd(args.remote_workdir)} && "
+        f"echo {shlex.quote(collect_encoded)} | base64 -d > {shlex.quote(log_root + '/collect.slurm')} && "
+        f"sbatch --dependency=afterany:{shlex.quote(array_job_id or '0')} "
+        f"{shlex.quote(log_root + '/collect.slurm')}"
+    )
+    collect_result = run(ssh_command(args, collect_remote), dry_run=args.dry_run)
+    if collect_result.stdout:
+        print(collect_result.stdout.rstrip())
+    if collect_result.stderr:
+        print(collect_result.stderr.rstrip())
+    if collect_result.returncode:
+        return collect_result.returncode
+    collect_match = re.search(r"Submitted batch job (\d+)", collect_result.stdout)
+    collect_job_id = "" if collect_match is None else collect_match.group(1)
     state_path = Path(args.state_path or ROOT / "logs" / f"{label}_search_state.json")
     write_state(
         state_path,
@@ -124,7 +187,8 @@ python pipelines/mlp/search/find_models.py 1 \
             "identity_file": args.identity_file,
             "remote_workdir": args.remote_workdir,
             "run_label": label,
-            "job_id": "" if match is None else match.group(1),
+            "job_id": array_job_id,
+            "collect_job_id": collect_job_id,
             "output_root": output_root,
             "models_root": models_root,
         },

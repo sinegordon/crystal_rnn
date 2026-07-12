@@ -36,8 +36,11 @@ for rank, row in enumerate(rows[:10], 1):
     print(f'{rank}\t{float(row["selection_score"]):.6f}\t{float(row["sqw_norm"]):.6f}\t{float(row["velocity_score"]):.6f}\t{row["model_path"]}')
 '''
     parts = [f"cd {remote_cd(state['remote_workdir'])}"]
-    if state.get("job_id"):
-        parts.append(f"squeue -j {shlex.quote(state['job_id'])} -o '%i|%T|%M|%R|%j' || true")
+    job_ids = ",".join(
+        value for value in (state.get("job_id", ""), state.get("collect_job_id", "")) if value
+    )
+    if job_ids:
+        parts.append(f"squeue -j {shlex.quote(job_ids)} -o '%i|%T|%M|%R|%j' || true")
     parts.append(f"python -c {shlex.quote(remote_python)}")
     if args.tail_lines:
         parts.append(
