@@ -5,7 +5,7 @@
     "identity_file": "~/.ssh/id_ed25519_cluster_vstu"
   },
   "paths": {
-    "remote_workdir": "~/crystal_rnn_accnorm"
+    "remote_workdir": "~/crystal_rnn_mlp"
   },
   "slurm": {
     "default_partition": "gold-batch",
