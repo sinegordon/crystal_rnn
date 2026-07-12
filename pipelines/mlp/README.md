@@ -66,6 +66,7 @@ conda run -n torch python pipelines/mlp/search/find_models.py 10 \
   --models-dir models333_mlp \
   --size 256 \
   --delta-frames 30000 \
+  --sampling-mode random \
   --epochs 50 \
   --count-steps 2000 \
   --count-run 3
@@ -74,6 +75,10 @@ conda run -n torch python pipelines/mlp/search/find_models.py 10 \
 Each checkpoint contains a format version, geometry, model configuration,
 normalization values, and a `state_dict`; it does not pickle the legacy RNN
 class.
+
+`--sampling-mode random` selects trajectory indices without replacement while
+keeping every input exactly aligned with its force target. Use `consecutive`
+only when reproducing the historical contiguous-window experiments.
 
 ## Convert a previous MLP1 model
 

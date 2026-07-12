@@ -38,6 +38,12 @@ def parse_args():
     parser.add_argument("--neighbor-shells", type=int, default=2)
     parser.add_argument("--cutoff-scale", type=float, default=1.05)
     parser.add_argument("--delta-frames", type=int, default=30000)
+    parser.add_argument(
+        "--sampling-mode",
+        choices=["random", "consecutive"],
+        default="random",
+        help="Choose independent random trajectory frames or one consecutive window.",
+    )
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -84,24 +90,36 @@ def load_data(path):
     return data
 
 
-def select_training_window(data, delta_frames, rng):
-    """Select consecutive trajectory frames and all blocks belonging to them."""
+def select_training_samples(data, delta_frames, rng, sampling_mode):
+    """Select aligned one-frame inputs and force targets by trajectory index."""
     frame_count = int(data["displacements"].shape[0])
     sample_windows = frame_count - 1
     sample_count = int(data["input_blocks"].shape[0])
     if sample_windows <= 0 or sample_count % sample_windows:
         raise ValueError("input_blocks count is inconsistent with displacement frames")
     blocks_per_frame = sample_count // sample_windows
-    selected_frames = min(int(delta_frames), frame_count)
-    start = 0 if selected_frames == frame_count else int(rng.integers(0, frame_count - selected_frames + 1))
-    usable_frames = selected_frames - 1
-    sample_start = start * blocks_per_frame
-    sample_stop = sample_start + usable_frames * blocks_per_frame
-    print(f"TRAIN FRAMES {start}:{start + selected_frames}")
-    print(f"TRAIN BLOCKS {sample_start}:{sample_stop}")
+    if sampling_mode == "random":
+        selected_count = min(int(delta_frames), sample_windows)
+        time_indices = np.sort(rng.choice(sample_windows, size=selected_count, replace=False))
+        sample_indices = (
+            time_indices[:, None] * blocks_per_frame + np.arange(blocks_per_frame)[None, :]
+        ).reshape(-1)
+        print(f"TRAIN RANDOM FRAMES count={selected_count} range={time_indices[0]}:{time_indices[-1] + 1}")
+        print(f"TRAIN RANDOM BLOCKS count={len(sample_indices)}")
+    elif sampling_mode == "consecutive":
+        selected_frames = min(int(delta_frames), frame_count)
+        start = 0 if selected_frames == frame_count else int(rng.integers(0, frame_count - selected_frames + 1))
+        usable_frames = selected_frames - 1
+        sample_start = start * blocks_per_frame
+        sample_stop = sample_start + usable_frames * blocks_per_frame
+        sample_indices = np.arange(sample_start, sample_stop)
+        print(f"TRAIN CONSECUTIVE FRAMES {start}:{start + selected_frames}")
+        print(f"TRAIN CONSECUTIVE BLOCKS {sample_start}:{sample_stop}")
+    else:  # pragma: no cover - guarded by argparse.
+        raise ValueError(f"Unsupported sampling_mode={sampling_mode!r}")
     return (
-        data["input_blocks"][sample_start:sample_stop],
-        data["force_acceleration_blocks"][sample_start:sample_stop],
+        data["input_blocks"][sample_indices],
+        data["force_acceleration_blocks"][sample_indices],
     )
 
 
@@ -199,7 +217,12 @@ def main():
         model.reference_pressure_loss_weight = args.reference_pressure_loss_weight
         model.reference_pressure_target = args.reference_pressure_target
         model.reference_pressure_loss_scale = args.reference_pressure_loss_scale
-        inputs, targets = select_training_window(data, args.delta_frames, rng)
+        inputs, targets = select_training_samples(
+            data,
+            args.delta_frames,
+            rng,
+            args.sampling_mode,
+        )
         losses = model.fit(
             inputs,
             targets,
@@ -249,6 +272,7 @@ def main():
             "size": args.size,
             "parameter_count": model.parameter_count,
             "delta_frames": args.delta_frames,
+            "sampling_mode": args.sampling_mode,
             "seed": "" if args.seed is None else args.seed,
         }
         rows.append(row)

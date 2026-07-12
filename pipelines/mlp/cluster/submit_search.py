@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument("--eval-data-path", default=None)
     parser.add_argument("--size", type=int, default=256)
     parser.add_argument("--delta-frames", type=int, default=30000)
+    parser.add_argument("--sampling-mode", choices=["random", "consecutive"], default="random")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=0.001)
@@ -90,7 +91,7 @@ python pipelines/mlp/search/find_models.py 1 \
   --models-dir {models_root}/task_${{TASK}} \
   --metrics-path {output_root}/task_${{TASK}}/metrics.tsv \
   --plot-output-dir {output_root}/task_${{TASK}} \
-  --size {args.size} --delta-frames {args.delta_frames} \
+  --size {args.size} --delta-frames {args.delta_frames} --sampling-mode {args.sampling_mode} \
   --epochs {args.epochs} --batch-size {args.batch_size} --learning-rate {args.learning_rate} \
   --count-steps {args.count_steps} --count-run {args.count_run} \
   --velocity-score-weight {args.velocity_score_weight} \
