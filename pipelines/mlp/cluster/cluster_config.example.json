@@ -1,0 +1,18 @@
+{
+  "ssh": {
+    "host": "user@cluster.example.org",
+    "port": "22",
+    "identity_file": "~/.ssh/id_ed25519"
+  },
+  "paths": {
+    "remote_workdir": "~/crystal_rnn_mlp"
+  },
+  "slurm": {
+    "default_partition": "gpu",
+    "gpu_nodelist": "gpu-node",
+    "train_partition": "gpu",
+    "train_nodelist": "gpu-node",
+    "collect_partition": "cpu",
+    "conda_env": "torch"
+  }
+}

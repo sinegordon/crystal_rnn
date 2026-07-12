@@ -1,5 +1,10 @@
 # Pair-Energy Pipeline
 
+The article-only, one-frame implementation is available in
+[`mlp/README.md`](mlp/README.md). It provides an independent model class, data
+format, search, stateless ASE calculator, postprocessing, and cluster launchers
+without RNN compatibility arguments.
+
 This branch exposes one stable model pipeline: conservative `pair_energy`.
 
 Public entrypoints:

@@ -53,9 +53,9 @@ The corresponding long-run S(q,w) correlation was about:
 ## Reproducibility Status
 
 The manuscript now uses the one-frame MLP `ref-plus-delta` model as its headline
-configuration. The matching MLP implementation and integration-history slicing
-are included in this branch. The historical checkpoint used for the 100 ps
-headline run was:
+configuration. The independent `CrystalPairEnergyMLPNet` implementation and
+its stateless ASE pipeline are included in this branch. The historical
+checkpoint used for the 100 ps headline run was:
 
 ```text
 models333_pair_energy_mlp_refplusdelta_L1_d30k_10_forceonly_20260705/
@@ -65,7 +65,10 @@ mean_norm_0.6530284269166575_rnn_pair_energy_rnn_acceleration_h128_rl1_readoutfi
 The checkpoint itself is not stored in Git and is not currently present in the
 local model archive. It must be recovered or the documented search must be
 repeated before publication. The matching architecture has `67,841` trainable
-parameters; record the final checkpoint checksum after recovery or retraining.
+parameters. A legacy checkpoint with this architecture can be converted by
+`pipelines/mlp/convert_legacy_checkpoint.py`, which verifies force equivalence
+before saving. Record the final checkpoint checksum after recovery or
+retraining.
 
 ## Branch Intent
 

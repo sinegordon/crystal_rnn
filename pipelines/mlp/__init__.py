@@ -1,0 +1,1 @@
+"""Standalone article MLP pipeline."""

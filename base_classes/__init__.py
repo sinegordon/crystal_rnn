@@ -14,6 +14,7 @@ from .edge_rnn_predictor import (
 )
 from .hybrid_crystal_predictor import CrystalHybridRNNNet
 from .local_rnn_predictor import CrystalLocalRNNNet, make_local_patch_samples
+from .pair_energy_mlp import CrystalPairEnergyMLPNet
 from .crystal_data import (
     CU_MASS_AMU,
     FCC_CONVENTIONAL_BASIS,
@@ -39,6 +40,7 @@ __all__ = [
     "CrystalEdgeRNNNet",
     "CrystalPairEnergyFinalHiddenRNNNet",
     "CrystalPairEnergyRNNNet",
+    "CrystalPairEnergyMLPNet",
     "CrystalPairForceFinalHiddenRNNNet",
     "CrystalPairForceRNNNet",
     "CrystalHybridRNNNet",
