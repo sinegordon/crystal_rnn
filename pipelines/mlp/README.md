@@ -41,7 +41,7 @@ python pipelines/mlp/data/prepare_data.py \
   /path/to/Cu333/dump.lammpstrj data333_mlp_force.npz \
   --crystal-shape 3 3 3 \
   --train-supercell-shape 3 3 3 \
-  --dt-ps 0.02
+  --dt-ps 0.002
 ```
 
 The output stores `input_blocks` with shape
@@ -87,7 +87,7 @@ python pipelines/mlp/ase/run_nvt.py \
   --initial-frames 10 11 \
   --temperature-k 300 \
   --taut-fs 200 \
-  --dt-ps 0.02
+  --dt-ps 0.002
 
 python pipelines/mlp/postprocess/run_all.py \
   --ase-path outputs/mlp_1055/trajectory.npz \

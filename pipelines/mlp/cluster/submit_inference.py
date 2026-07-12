@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--initial-frames", nargs=2, type=int, default=(0, 1))
     parser.add_argument("--temperature-k", type=float, default=300.0)
     parser.add_argument("--taut-fs", type=float, default=200.0)
-    parser.add_argument("--dt-ps", type=float, default=0.02)
+    parser.add_argument("--dt-ps", type=float, default=0.002)
     parser.add_argument("--record-interval", type=int, default=1)
     parser.add_argument("--block-batch-size", type=int, default=250)
     parser.add_argument("--ncells", type=int, default=10)

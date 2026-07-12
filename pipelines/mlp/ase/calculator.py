@@ -44,7 +44,7 @@ class CrystalPairEnergyMLPCalculator(Calculator):
         self,
         model_path,
         data_path,
-        dt_ps=0.02,
+        dt_ps=0.002,
         device="auto",
         periodic=True,
         block_batch_size=250,

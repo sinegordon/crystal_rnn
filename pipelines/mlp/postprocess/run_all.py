@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -21,6 +23,7 @@ def parse_args():
     parser.add_argument("--ncells", type=int, default=10)
     parser.add_argument("--kcount", type=int, default=10)
     parser.add_argument("--sqw-step", type=int, default=10)
+    parser.add_argument("--dt-ps", type=float, default=None, help="Frame timestep; defaults to dt_ps saved in ASE NPZ.")
     parser.add_argument("--velocity-window-frames", type=int, default=10)
     parser.add_argument("--phase-window-frames", type=int, default=1000)
     parser.add_argument("--strict", action="store_true", help="Stop when any optional diagnostic fails.")
@@ -35,6 +38,15 @@ def main():
     ase_path = str(Path(args.ase_path))
     data_path = str(Path(args.data_path))
     python = sys.executable
+    if args.dt_ps is None:
+        with np.load(ase_path) as trajectory:
+            if "dt_ps" not in trajectory.files:
+                raise ValueError("ASE trajectory has no dt_ps; pass --dt-ps explicitly")
+            dt_ps = float(np.asarray(trajectory["dt_ps"]))
+    else:
+        dt_ps = float(args.dt_ps)
+    if dt_ps <= 0:
+        raise ValueError("dt-ps must be positive")
 
     def command(script, *options):
         return [python, str(ROOT / script), *map(str, options)]
@@ -47,6 +59,7 @@ def main():
             "--output-path", output / "sqw_comparison.png",
             "--ncells", args.ncells,
             "--kcount", args.kcount,
+            "--dt", dt_ps,
             "--step", args.sqw_step,
         ),
         command(
