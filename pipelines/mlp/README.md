@@ -24,6 +24,7 @@ There is no hidden trajectory history in the ASE calculator.
 ## Files
 
 - `data/prepare_data.py`: LAMMPS dump to one-frame force-training NPZ.
+- `data/convert_legacy_npz.py`: validated conversion of a force-enabled legacy NPZ.
 - `search/find_models.py`: local training, S(q,w) ranking, plots, and checkpoints.
 - `ase/calculator.py`: stateless ASE calculator.
 - `ase/run_nvt.py`: two-frame initialization and Bussi NVT inference.
@@ -48,6 +49,14 @@ The output stores `input_blocks` with shape
 `(samples, 3, 3, 3, atoms_per_cell, 3)`. It deliberately has no temporal axis.
 The search script can also read a legacy NPZ and uses the latest frame of each
 legacy `X_blocks` sample.
+
+If the force-enabled legacy NPZ is already available, create a compact explicit
+MLP dataset without re-reading the LAMMPS dump:
+
+```bash
+python pipelines/mlp/data/convert_legacy_npz.py \
+  data333_force_L1.npz data/data333_mlp_force.npz
+```
 
 ## Search locally
 
